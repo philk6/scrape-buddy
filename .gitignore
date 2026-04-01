@@ -1,0 +1,44 @@
+# Environment and secrets
+.env
+.env.*
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.s*
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# Database (local scrape history — will be recreated on deploy)
+*.db
+*.db-journal
+
+# Logs
+*.log
+# Cache
+cache/
+
+# Sessions (Playwright browser state)
+sessions/
+
+# Debug / test scripts (not needed in production)
+_[!_]*.py
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# App log
+app.log
+
+# Tools (benchmark/debug utilities — not needed in production)
+tools/
