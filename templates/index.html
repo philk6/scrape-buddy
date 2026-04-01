@@ -1,0 +1,174 @@
+egory/widgets"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button id="scrapeBtn" onclick="runScrape()">Scrape</button>
+        </div>
+        <div class="label-row">
+          <label for="labelInput">Label (optional):</label>
+          <input
+            type="text"
+            id="labelInput"
+            placeholder="Auto-generated from domain + time if left blank"
+            autocomplete="off"
+          />
+        </div>
+      </div>
+
+      <!-- ── Login-Required Crawl panel ── -->
+      <div class="mode-panel" id="panelLogin">
+        <div class="field-group">
+          <div class="field-label">Login URL</div>
+          <div class="input-row">
+            <input
+              type="url"
+              id="loginUrlInput"
+              placeholder="https://example.com/account/login"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+        </div>
+        <div class="field-group">
+          <div class="field-label">Category / Listing URL (after login)</div>
+          <div class="input-row">
+            <input
+              type="url"
+              id="authUrlInput"
+              placeholder="https://example.com/collections/all-products"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+        </div>
+        <div class="field-group">
+          <div class="label-row">
+            <label for="authLabelInput">Label (optional):</label>
+            <input
+              type="text"
+              id="authLabelInput"
+              placeholder="Auto-generated from domain + time if left blank"
+              autocomplete="off"
+            />
+          </div>
+        </div>
+        <div class="login-actions">
+          <button class="btn-secondary" id="startLoginBtn" onclick="startLoginSession()">
+            ⟢ Start Login Session
+          </button>
+          <button
+            class="btn-secondary"
+            id="continueLoginBtn"
+            onclick="continueAfterLogin()"
+            disabled
+            style="background: linear-gradient(135deg, var(--gold) 0%, var(--gold-light) 100%); color: #0b0b0b; border: none; opacity: 0.4;"
+          >
+            ▶ Continue Scrape After Login
+          </button>
+        </div>
+        <div id="loginStatus" class="login-status"></div>
+      </div>
+
+    </div>
+
+    <!-- Status line -->
+    <div id="status"></div>
+
+    <!-- Results table -->
+    <div id="resultsWrapper" style="display:none;">
+      <div class="results-meta">
+        <strong>Results</strong>
+        <span id="countBadge" class="count-badge">0</span>
+        <span id="strategyInfo"></span>
+        <!-- Export button — uses the run_id returned by the scrape endpoint -->
+        <button class="btn-export" onclick="exportRun(currentRunId)">⬇ Export .xlsx</button>
+      </div>
+
+      <div id="qualityBar" class="quality-bar">
+        <div class="quality-title">Run Quality</div>
+        <div id="qualityGrid" class="quality-grid"></div>
+      </div>
+
+      <div id="diagnosticsPanel" class="diagnostics-panel">
+        <div class="diagnostics-title">Scrape Diagnostics</div>
+        <div id="diagnosticsList" class="diagnostics-list"></div>
+      </div>
+
+      <div class="results-toolbar" id="resultsToolbar" style="display:none;">
+        <button class="filter-chip active" data-filter="all" onclick="setResultFilter('all', this)">All Rows</button>
+        <button class="filter-chip" data-filter="missing_name" onclick="setResultFilter('missing_name', this)">Missing Name</button>
+        <button class="filter-chip" data-filter="missing_price" onclick="setResultFilter('missing_price', this)">Missing Price</button>
+        <button class="filter-chip" data-filter="missing_sku" onclick="setResultFilter('missing_sku', this)">Missing SKU</button>
+        <button class="filter-chip" data-filter="missing_upc" onclick="setResultFilter('missing_upc', this)">Missing UPC</button>
+        <button class="filter-chip" data-filter="missing_url" onclick="setResultFilter('missing_url', this)">Missing URL</button>
+      </div>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Image</th>
+              <th>Product Name</th>
+              <th>Brand</th>
+              <th>Price</th>
+              <th>SKU</th>
+              <th>UPC</th>
+              <th>Pack Size</th>
+              <th>Case Pack</th>
+              <th>URL</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /main-content -->
+</div><!-- /app-shell -->
+
+<!-- ══ Chat widget ════════════════════════════════════════════════════════════ -->
+<button id="chatToggle" onclick="toggleChat()" title="Open support assistant">
+  <svg viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <line x1="17" y1="2" x2="17" y2="7" stroke="#c9a84c" stroke-width="1.5" stroke-linecap="round"/>
+    <circle cx="17" cy="1.5" r="1.5" fill="#e2c06a"/>
+    <rect x="6" y="7" width="22" height="18" rx="3.5" fill="#1a1500" stroke="#c9a84c" stroke-width="1.4"/>
+    <rect x="10" y="12" width="4" height="4" rx="1" fill="#c9a84c"/>
+    <rect x="20" y="12" width="4" height="4" rx="1" fill="#c9a84c"/>
+    <rect x="11.5" y="13" width="1.2" height="1.2" rx="0.3" fill="#ffe98a" opacity="0.8"/>
+    <rect x="21.5" y="13" width="1.2" height="1.2" rx="0.3" fill="#ffe98a" opacity="0.8"/>
+    <rect x="11" y="20" width="12" height="2.5" rx="1.25" fill="#c9a84c" opacity="0.7"/>
+    <rect x="4" y="13" width="2.5" height="5" rx="1" fill="#8a6e2f"/>
+    <rect x="27.5" y="13" width="2.5" height="5" rx="1" fill="#8a6e2f"/>
+  </svg>
+</button>
+
+<div id="chatPanel">
+  <div id="chatHeader">
+    <div class="bot-dot"></div>
+    <div><div class="bot-name">Syndicate Assistant</div></div>
+    <div class="bot-status">Online</div>
+  </div>
+  <div id="chatMessages">
+    <div class="chat-msg assistant">Hello. I'm your Syndicate scraping assistant. Ask me anything about using this tool.</div>
+  </div>
+  <div id="chatInputRow">
+    <input type="text" id="chatInput" placeholder="Ask a question…" autocomplete="off" />
+    <button id="chatSendBtn" onclick="sendChat()">Send</button>
+  </div>
+</div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────────
+  let currentRunId    = null;   // run_id of the most recently scraped/loaded run
+  let activeHistoryId = null;   // id of the currently highlighted history item
+  let loginSessionId  = null;   // session_id from /api/auth/start
+  let watchingRunIds  = new Set(); // run IDs we're polling until complete/failed
+  let pollInterval    = null;   // setInterval handle for background job polling
+  let currentProducts = [];     // currently rendered rows
+  let currentFilter   = "all";  // active QA filter
+  let currentRunMeta  = null;   // currently loaded run metadata
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+
+  function setMode(mode) {
+    //Existing mode logic goes here
