@@ -64,4 +64,36 @@ def _dismiss_cookie_banner(page) -> None:
 
 def _probe_authenticated_state(page) -> bool:
     try:
-        page.goto(
+        page.goto(ACCOUNT_PROBE_URL, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(1500)
+        body = page.locator('body').inner_text(timeout=5000)
+        if _looks_authenticated(body, page.url):
+            page.goto(CATALOG_PROBE_URL, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(1500)
+            catalog_body = page.locator('body').inner_text(timeout=5000)
+            return _catalog_access_ok(catalog_body, page.url)
+    except Exception:
+        return False
+    return False
+
+
+def _looks_authenticated(content: str, url: str) -> bool:
+    lowered = content.lower() if isinstance(content, str) else ""
+    return (
+        'sign out' in lowered
+        and 'account status' in lowered
+        and 'approved' in lowered
+        and 'registered customers' not in lowered
+        and '/customer/account/' in url.lower()
+    )
+
+
+def _catalog_access_ok(content: str, url: str) -> bool:
+    lowered = content.lower() if isinstance(content, str) else ""
+    return (
+        'items 1-64 of' in lowered
+        and 'sign out' in lowered
+        and 'registered customers' not in lowered
+        and 'customer login' not in lowered
+        and 'confections' in url.lower()
+    )
