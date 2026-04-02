@@ -1,6 +1,10 @@
-import flask
-import redis
-import requests
-import bs4
-import playwright
-dictionary
+flask
+gunicorn
+requests
+beautifulsoup4
+lxml
+flask-cors
+openai
+openpyxl
+playwright
+python-dotenv
