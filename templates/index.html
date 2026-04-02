@@ -6,168 +6,236 @@
 <title>Scrape Buddy — The Syndicate</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0f0f0f;--card:#1a1a1a;--border:#2a2a2a;--gold:#d4a843;--gold-dim:#a8842f;--text:#e0e0e0;--muted:#888;--green:#4caf50;--red:#ef5350}
+:root{--bg:#0f0f0f;--card:#1a1a1a;--card2:#151515;--border:#2a2a2a;--gold:#d4a843;--gold-dim:#a8842f;--text:#e0e0e0;--muted:#888;--green:#4caf50;--red:#ef5350}
 body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:hidden}
-/* Sidebar */
-.sidebar{width:280px;background:#111;border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
-.sidebar-header{padding:20px;border-bottom:1px solid var(--border);text-align:center}
-.sidebar-header h2{color:var(--gold);font-size:1.1rem;font-weight:600}
-.sidebar-header p{color:var(--muted);font-size:.75rem;margin-top:4px}
-.history-list{flex:1;overflow-y:auto;padding:8px}
-.history-item{padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:4px;transition:background .2s}
-.history-item:hover{background:var(--card)}
-.history-item .label{font-size:.85rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.history-item .meta{font-size:.7rem;color:var(--muted);margin-top:2px}
-.no-history{color:var(--muted);text-align:center;padding:40px 20px;font-size:.85rem}
-/* Main */
+
+/* ── Sidebar ─────────────────────────────────────── */
+.sidebar{width:260px;background:#0c0c0c;border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-top{padding:16px 16px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
+.sidebar-top h2{font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.sidebar-top button{background:none;border:none;color:var(--gold);font-size:.8rem;cursor:pointer}
+.sidebar-top button:hover{text-decoration:underline}
+.history-list{flex:1;overflow-y:auto;padding:6px 8px}
+.history-item{padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:2px;transition:background .2s}
+.history-item:hover,.history-item.active{background:var(--card)}
+.history-item .hi-label{font-size:.82rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.history-item .hi-meta{font-size:.7rem;color:var(--muted);margin-top:2px}
+.history-item .hi-actions{display:flex;gap:6px;margin-top:6px}
+.history-item .hi-actions button{font-size:.68rem;padding:3px 8px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s}
+.history-item .hi-actions button:hover{border-color:var(--gold);color:var(--gold)}
+.history-item .hi-actions .btn-del{color:var(--red);border-color:#5a2020}
+.history-item .hi-actions .btn-del:hover{border-color:var(--red);color:var(--red)}
+.no-history{color:var(--muted);text-align:center;padding:40px 16px;font-size:.82rem}
+
+/* ── Main ────────────────────────────────────────── */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
-.topbar{padding:16px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px}
-.topbar h1{color:var(--gold);font-size:1.3rem;font-weight:700}
-.topbar .status{margin-left:auto;font-size:.8rem;color:var(--muted)}
-.content{flex:1;overflow-y:auto;padding:24px}
-/* Form Card */
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:20px}
-.card h3{color:var(--gold);font-size:1rem;margin-bottom:16px;font-weight:600}
-.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.form-group{display:flex;flex-direction:column;gap:6px}
-.form-group.full{grid-column:1/-1}
-.form-group label{font-size:.8rem;color:var(--muted);font-weight:500}
-.form-group input,.form-group select{background:#111;border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-size:.9rem;outline:none;transition:border-color .2s}
-.form-group input:focus,.form-group select:focus{border-color:var(--gold)}
-.form-group input::placeholder{color:#555}
-.checkbox-row{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
-.checkbox-row label{display:flex;align-items:center;gap:6px;font-size:.85rem;color:var(--text);cursor:pointer}
-.checkbox-row input[type=checkbox]{accent-color:var(--gold);width:16px;height:16px}
-.btn-row{display:flex;gap:12px;margin-top:8px}
-.btn{padding:10px 24px;border-radius:8px;border:none;font-size:.9rem;font-weight:600;cursor:pointer;transition:all .2s}
-.btn-primary{background:var(--gold);color:#000}.btn-primary:hover{background:var(--gold-dim)}
-.btn-primary:disabled{opacity:.5;cursor:not-allowed}
-.btn-secondary{background:transparent;border:1px solid var(--border);color:var(--text)}.btn-secondary:hover{border-color:var(--gold)}
-/* Progress */
-.progress-area{display:none;margin-top:16px}
-.progress-bar-outer{background:#222;border-radius:6px;height:8px;overflow:hidden}
+.header{padding:20px 28px 0}
+.header .brand{font-size:.7rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:600;margin-bottom:4px}
+.header h1{font-size:1.5rem;font-weight:700;color:var(--text);margin-bottom:4px}
+.header .subtitle{font-size:.85rem;color:var(--muted)}
+.content{flex:1;overflow-y:auto;padding:20px 28px 28px}
+
+/* ── Tabs ────────────────────────────────────────── */
+.tabs{display:flex;gap:0;margin-bottom:20px}
+.tab{padding:10px 22px;font-size:.85rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--muted);transition:all .2s}
+.tab:first-child{border-radius:8px 0 0 8px}
+.tab:last-child{border-radius:0 8px 8px 0}
+.tab.active{background:var(--gold);color:#000;border-color:var(--gold)}
+
+/* ── URL Bar ─────────────────────────────────────── */
+.url-bar{display:flex;gap:0;margin-bottom:16px}
+.url-bar input{flex:1;background:var(--card);border:1px solid var(--border);border-right:none;border-radius:8px 0 0 8px;padding:14px 18px;color:var(--text);font-size:.92rem;outline:none;transition:border-color .2s}
+.url-bar input:focus{border-color:var(--gold)}
+.url-bar input::placeholder{color:#555}
+.url-bar button{padding:14px 32px;background:var(--gold);color:#000;font-size:.92rem;font-weight:700;border:1px solid var(--gold);border-radius:0 8px 8px 0;cursor:pointer;transition:background .2s;white-space:nowrap}
+.url-bar button:hover{background:var(--gold-dim);border-color:var(--gold-dim)}
+.url-bar button:disabled{opacity:.5;cursor:not-allowed}
+
+/* ── Login Fields (shown in Login tab) ───────────── */
+.login-fields{display:none;margin-bottom:16px}
+.login-fields.show{display:block}
+.login-fields .lf-row{display:flex;gap:12px;margin-bottom:8px}
+.login-fields .lf-row input{flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-size:.85rem;outline:none}
+.login-fields .lf-row input:focus{border-color:var(--gold)}
+
+/* ── Options Row ─────────────────────────────────── */
+.options-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+.options-row label{font-size:.78rem;color:var(--muted);font-weight:500}
+.options-row select{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:.82rem;outline:none}
+.options-row .opt-check{display:flex;align-items:center;gap:5px;font-size:.82rem;color:var(--text);cursor:pointer}
+.options-row .opt-check input{accent-color:var(--gold);width:14px;height:14px}
+
+/* ── Status Line ─────────────────────────────────── */
+.status-line{margin-bottom:20px;font-size:.85rem}
+.status-line .status-ok{color:var(--green)}
+.status-line .status-err{color:var(--red)}
+.status-line .status-info{color:var(--gold)}
+
+/* ── Progress ────────────────────────────────────── */
+.progress-area{display:none;margin-bottom:20px}
+.progress-bar-outer{background:#222;border-radius:6px;height:6px;overflow:hidden}
 .progress-bar-inner{background:var(--gold);height:100%;width:0%;transition:width .3s}
-.progress-text{font-size:.8rem;color:var(--muted);margin-top:6px}
-/* Results */
-.results-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
-.results-header h3{color:var(--gold);font-size:1rem;font-weight:600}
-.results-header .count{font-size:.8rem;color:var(--muted)}
-.results-header .export-btn{margin-left:auto}
+.progress-text{font-size:.78rem;color:var(--muted);margin-top:4px}
+
+/* ── Diagnostics Card ────────────────────────────── */
+.diag-card{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin-bottom:20px;display:none}
+.diag-card h4{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--gold);margin-bottom:12px}
+.diag-grid{display:flex;flex-wrap:wrap;gap:20px}
+.diag-grid .dg-item{display:flex;flex-direction:column;gap:2px}
+.diag-grid .dg-item .dg-label{font-size:.68rem;color:var(--muted);font-weight:600;text-transform:uppercase}
+.diag-grid .dg-item .dg-value{font-size:.82rem;color:var(--text)}
+
+/* ── Results Table ───────────────────────────────── */
+.results-bar{display:flex;align-items:center;gap:12px;margin-bottom:12px;display:none}
+.results-bar h3{font-size:.9rem;font-weight:700;color:var(--text)}
+.results-bar .count{font-size:.75rem;color:var(--gold);background:#2a2211;padding:2px 10px;border-radius:10px;font-weight:700}
+.results-bar .rb-meta{font-size:.75rem;color:var(--muted);margin-left:8px}
+.results-bar .export-btn{margin-left:auto;padding:6px 14px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;cursor:pointer;transition:all .15s}
+.results-bar .export-btn:hover{border-color:var(--gold);color:var(--gold)}
+.table-wrap{overflow-x:auto;margin-bottom:20px}
 table{width:100%;border-collapse:collapse}
-th{background:#111;color:var(--gold);font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;text-align:left;position:sticky;top:0}
-td{padding:10px 12px;border-bottom:1px solid var(--border);font-size:.85rem;color:var(--text)}
-tr:hover td{background:#1f1f1f}
-td img{width:50px;height:50px;object-fit:contain;border-radius:4px;background:#222}
-.empty-state{text-align:center;padding:60px 20px;color:var(--muted)}
-.empty-state p{font-size:.95rem;margin-bottom:8px}
-.empty-state .sub{font-size:.8rem}
-/* Chat Widget */
-.chat-toggle{position:fixed;bottom:20px;right:20px;width:52px;height:52px;border-radius:50%;background:var(--gold);color:#000;border:none;font-size:1.4rem;cursor:pointer;box-shadow:0 4px 20px rgba(212,168,67,.4);z-index:1000;display:flex;align-items:center;justify-content:center}
-.chat-panel{position:fixed;bottom:80px;right:20px;width:360px;height:480px;background:var(--card);border:1px solid var(--border);border-radius:12px;display:none;flex-direction:column;z-index:1000;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+th{background:#111;color:var(--gold);font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;padding:10px 12px;text-align:left;position:sticky;top:0}
+td{padding:10px 12px;border-bottom:1px solid #1e1e1e;font-size:.82rem;color:var(--text)}
+tr:hover td{background:#1a1a1a}
+td img{width:48px;height:48px;object-fit:contain;border-radius:4px;background:#1a1a1a}
+.empty-state{text-align:center;padding:80px 20px;color:var(--muted)}
+.empty-state p{font-size:.9rem;margin-bottom:6px}
+.empty-state .sub{font-size:.78rem}
+
+/* ── Chat Widget ─────────────────────────────────── */
+.chat-toggle{position:fixed;bottom:20px;right:20px;width:48px;height:48px;border-radius:50%;background:var(--gold);color:#000;border:none;font-size:1.3rem;cursor:pointer;box-shadow:0 4px 20px rgba(212,168,67,.4);z-index:1000;display:flex;align-items:center;justify-content:center}
+.chat-panel{position:fixed;bottom:76px;right:20px;width:360px;height:460px;background:var(--card);border:1px solid var(--border);border-radius:12px;display:none;flex-direction:column;z-index:1000;box-shadow:0 8px 32px rgba(0,0,0,.5)}
 .chat-panel.open{display:flex}
-.chat-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
-.chat-head span{color:var(--gold);font-weight:600;font-size:.9rem}
-.chat-head button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.2rem}
+.chat-head{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.chat-head span{color:var(--gold);font-weight:600;font-size:.88rem}
+.chat-head button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem}
 .chat-messages{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:8px}
-.chat-msg{max-width:85%;padding:10px 14px;border-radius:12px;font-size:.85rem;line-height:1.4}
+.chat-msg{max-width:85%;padding:10px 14px;border-radius:12px;font-size:.83rem;line-height:1.4}
 .chat-msg.bot{background:#222;color:var(--text);align-self:flex-start;border-bottom-left-radius:4px}
 .chat-msg.user{background:var(--gold);color:#000;align-self:flex-end;border-bottom-right-radius:4px}
 .chat-input-row{padding:12px;border-top:1px solid var(--border);display:flex;gap:8px}
-.chat-input-row input{flex:1;background:#111;border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:.85rem;outline:none}
+.chat-input-row input{flex:1;background:#111;border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:.83rem;outline:none}
 .chat-input-row button{background:var(--gold);border:none;color:#000;border-radius:8px;padding:0 16px;font-weight:600;cursor:pointer}
-@media(max-width:768px){.sidebar{display:none}.form-grid{grid-template-columns:1fr}}
+
+@media(max-width:768px){.sidebar{display:none}.options-row{flex-direction:column;align-items:flex-start}}
 </style>
 </head>
 <body>
-<!-- Sidebar -->
+
+<!-- ── Sidebar ────────────────────────────────────── -->
 <div class="sidebar">
-  <div class="sidebar-header">
-    <h2>Scrape Buddy</h2>
-    <p>The Syndicate Amazon Mastery</p>
+  <div class="sidebar-top">
+    <h2>History</h2>
+    <button onclick="loadHistory()">↻ Refresh</button>
   </div>
   <div class="history-list" id="historyList">
-    <div class="no-history" id="noHistory">No scrape history yet.<br>Run your first scrape to get started.</div>
+    <div class="no-history" id="noHistory">No scrape history yet.</div>
   </div>
 </div>
 
-<!-- Main Content -->
+<!-- ── Main ───────────────────────────────────────── -->
 <div class="main">
-  <div class="topbar">
-    <h1>Scrape Buddy</h1>
-    <div class="status" id="statusText">Ready</div>
+  <div class="header">
+    <div class="brand">The Syndicate · Amazon Mastery</div>
+    <h1>UPC Scraper</h1>
+    <p class="subtitle">Paste a supplier category page URL and click Scrape to extract product data.</p>
   </div>
   <div class="content">
-    <!-- Scrape Form -->
-    <div class="card">
-      <h3>New Scrape</h3>
-      <div class="form-grid">
-        <div class="form-group">
-          <label>Login URL (optional)</label>
-          <input type="text" id="loginUrl" placeholder="https://supplier.com/login">
-        </div>
-        <div class="form-group">
-          <label>Category / Listing URL</label>
-          <input type="text" id="categoryUrl" placeholder="https://supplier.com/products/category">
-        </div>
-        <div class="form-group">
-          <label>Label (optional)</label>
-          <input type="text" id="labelInput" placeholder="e.g. Grocery Q2 Scrape">
-        </div>
-        <div class="form-group">
-          <label>Mode</label>
-          <select id="modeSelect">
-            <option value="listing">Listing → Detail</option>
-            <option value="single">Single Page Table</option>
-            <option value="catalog">Playwright Catalog</option>
-          </select>
-        </div>
-        <div class="form-group full">
-          <div class="checkbox-row">
-            <label><input type="checkbox" id="chkUpc" checked> UPC Lookup</label>
-            <label><input type="checkbox" id="chkPaginate" checked> Auto-Paginate</label>
-            <label><input type="checkbox" id="chkJs"> JS Rendering</label>
-            <label><input type="checkbox" id="chkLogin"> Login First</label>
-          </div>
-        </div>
-        <div class="form-group full">
-          <div class="btn-row">
-            <button class="btn btn-primary" id="btnScrape" onclick="startScrape()">Start Scrape</button>
-            <button class="btn btn-secondary" onclick="clearForm()">Clear</button>
-          </div>
-        </div>
-      </div>
-      <div class="progress-area" id="progressArea">
-        <div class="progress-bar-outer"><div class="progress-bar-inner" id="progressBar"></div></div>
-        <div class="progress-text" id="progressText">Starting...</div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('public')">Public Category Crawl</div>
+      <div class="tab" onclick="switchTab('login')">Login-Required Crawl</div>
+    </div>
+
+    <!-- Login Fields (hidden by default) -->
+    <div class="login-fields" id="loginFields">
+      <div class="lf-row">
+        <input type="text" id="loginUrl" placeholder="Login page URL (e.g. https://supplier.com/login)">
       </div>
     </div>
 
-    <!-- Results -->
-    <div class="card" id="resultsCard" style="display:none">
-      <div class="results-header">
-        <h3>Results</h3>
-        <span class="count" id="resultCount"></span>
-        <button class="btn btn-secondary export-btn" onclick="exportXlsx()">Export .xlsx</button>
+    <!-- URL Bar -->
+    <div class="url-bar">
+      <input type="text" id="categoryUrl" placeholder="https://www.supplier.com/products/category-page">
+      <button id="btnScrape" onclick="startScrape()">Scrape</button>
+    </div>
+
+    <!-- Options Row -->
+    <div class="options-row">
+      <label>Label (optional):</label>
+      <input type="text" id="labelInput" placeholder="Auto-generated from domain + time if left blank" style="flex:1;min-width:180px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:.82rem;outline:none">
+      <label>Mode:</label>
+      <select id="modeSelect">
+        <option value="listing">Listing → Detail</option>
+        <option value="single">Single Page Table</option>
+        <option value="catalog">Playwright Catalog</option>
+      </select>
+      <label class="opt-check"><input type="checkbox" id="chkUpc" checked> UPC Lookup</label>
+      <label class="opt-check"><input type="checkbox" id="chkPaginate" checked> Auto-Paginate</label>
+      <label class="opt-check"><input type="checkbox" id="chkJs"> JS Rendering</label>
+    </div>
+
+    <!-- Status Line -->
+    <div class="status-line" id="statusLine"></div>
+
+    <!-- Progress -->
+    <div class="progress-area" id="progressArea">
+      <div class="progress-bar-outer"><div class="progress-bar-inner" id="progressBar"></div></div>
+      <div class="progress-text" id="progressText">Starting...</div>
+    </div>
+
+    <!-- Diagnostics -->
+    <div class="diag-card" id="diagCard">
+      <h4>Scrape Diagnostics</h4>
+      <div class="diag-grid">
+        <div class="dg-item"><span class="dg-label">Supplier</span><span class="dg-value" id="diagSupplier">—</span></div>
+        <div class="dg-item"><span class="dg-label">Strategy</span><span class="dg-value" id="diagStrategy">—</span></div>
+        <div class="dg-item"><span class="dg-label">Run Status</span><span class="dg-value" id="diagStatus">—</span></div>
+        <div class="dg-item"><span class="dg-label">Saved</span><span class="dg-value" id="diagSaved">—</span></div>
+        <div class="dg-item"><span class="dg-label">Rows</span><span class="dg-value" id="diagRows">—</span></div>
+        <div class="dg-item"><span class="dg-label">Quality</span><span class="dg-value" id="diagQuality">—</span></div>
       </div>
-      <div style="overflow-x:auto">
-        <table>
-          <thead>
-            <tr><th>Image</th><th>Product</th><th>Brand</th><th>SKU</th><th>UPC</th><th>Price</th><th>Pack</th></tr>
-          </thead>
-          <tbody id="resultsBody"></tbody>
-        </table>
-      </div>
+    </div>
+
+    <!-- Results Bar -->
+    <div class="results-bar" id="resultsBar">
+      <h3>Results</h3>
+      <span class="count" id="resultCount">0</span>
+      <span class="rb-meta" id="resultMeta"></span>
+      <button class="export-btn" onclick="exportXlsx()">⬇ Export .xlsx</button>
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrap">
+      <table id="resultsTable" style="display:none">
+        <thead>
+          <tr>
+            <th>Image</th>
+            <th>Product Name</th>
+            <th>Brand</th>
+            <th>Price</th>
+            <th>SKU</th>
+            <th>UPC</th>
+            <th>Pack Size</th>
+            <th>Case Pack</th>
+            <th>URI</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
     </div>
 
     <!-- Empty State -->
     <div class="empty-state" id="emptyState">
-      <p>Ready to scrape</p>
-      <p class="sub">Enter a supplier URL above and hit Start Scrape</p>
+      <p>No products found.</p>
+      <p class="sub">Paste a supplier URL above and click Scrape</p>
     </div>
+
   </div>
 </div>
 
-<!-- Chat Widget -->
+<!-- ── Chat Widget ────────────────────────────────── -->
 <button class="chat-toggle" onclick="toggleChat()" title="AI Support Chat">💬</button>
 <div class="chat-panel" id="chatPanel">
   <div class="chat-head">
@@ -185,15 +253,39 @@ td img{width:50px;height:50px;object-fit:contain;border-radius:4px;background:#2
 
 <script>
 let currentRunId=null;
+let currentTab='public';
 
-// ── History ─────────────────────────────────────────────────────────
+// ── Tabs ─────────────────────────────────────────────
+function switchTab(tab){
+  currentTab=tab;
+  document.querySelectorAll('.tab').forEach((t,i)=>{
+    t.classList.toggle('active',i===(tab==='public'?0:1));
+  });
+  document.getElementById('loginFields').classList.toggle('show',tab==='login');
+}
+
+// ── History ──────────────────────────────────────────
 async function loadHistory(){
   try{
     const r=await fetch('/api/history');
     const runs=await r.json();
     const el=document.getElementById('historyList');
     if(!runs.length){el.innerHTML='<div class="no-history">No scrape history yet.</div>';return}
-    el.innerHTML=runs.map(h=>`<div class="history-item" onclick="loadRun(${h.id})"><div class="label">${esc(h.label||'Untitled')}</div><div class="meta">${h.product_count||0} products · ${new Date(h.created_at).toLocaleDateString()}</div></div>`).join('');
+    el.innerHTML=runs.map(h=>{
+      const label=esc(h.label||h.domain||'Untitled');
+      const count=h.product_count||0;
+      const date=h.created_at?new Date(h.created_at).toLocaleDateString()+' '+new Date(h.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';
+      const cls=count>0?'8 items · saved':'0 items';
+      return `<div class="history-item" onclick="loadRun(${h.id})">
+        <div class="hi-label">${label} — ${date}</div>
+        <div class="hi-meta">${count} products${count>0?' · <span style="color:var(--green)">saved</span>':''}</div>
+        <div class="hi-actions">
+          <button onclick="event.stopPropagation();renameRun(${h.id})">— Rename</button>
+          <button onclick="event.stopPropagation();exportRun(${h.id})">⬇ xlsx</button>
+          <button class="btn-del" onclick="event.stopPropagation();deleteRun(${h.id})">✕</button>
+        </div>
+      </div>`;
+    }).join('');
   }catch(e){console.error('History load error',e)}
 }
 
@@ -202,32 +294,54 @@ async function loadRun(id){
     const r=await fetch('/api/history/'+id);
     const data=await r.json();
     currentRunId=id;
-    showResults(data.products||[]);
+    const products=data.products||[];
+    showResults(products,data);
   }catch(e){console.error('Run load error',e)}
 }
 
-// ── Scrape ──────────────────────────────────────────────────────────
+async function renameRun(id){
+  const name=prompt('Enter new label:');
+  if(!name)return;
+  try{
+    await fetch('/api/history/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:name})});
+    loadHistory();
+  }catch(e){alert('Rename failed')}
+}
+
+async function deleteRun(id){
+  if(!confirm('Delete this scrape run?'))return;
+  try{
+    await fetch('/api/history/'+id,{method:'DELETE'});
+    loadHistory();
+  }catch(e){alert('Delete failed')}
+}
+
+function exportRun(id){
+  window.location.href='/api/export/'+id;
+}
+
+// ── Scrape ───────────────────────────────────────────
 async function startScrape(){
   const url=document.getElementById('categoryUrl').value.trim();
   if(!url){alert('Please enter a category URL');return}
   const btn=document.getElementById('btnScrape');
   btn.disabled=true;btn.textContent='Scraping...';
-  document.getElementById('statusText').textContent='Scraping...';
   const pa=document.getElementById('progressArea');
   pa.style.display='block';
   document.getElementById('progressBar').style.width='10%';
   document.getElementById('progressText').textContent='Sending request...';
   document.getElementById('emptyState').style.display='none';
+  setStatus('Scraping...','info');
 
   const body={
     url:url,
-    login_url:document.getElementById('loginUrl').value.trim()||undefined,
+    login_url:currentTab==='login'?document.getElementById('loginUrl').value.trim()||undefined:undefined,
     label:document.getElementById('labelInput').value.trim()||undefined,
     mode:document.getElementById('modeSelect').value,
     upc_lookup:document.getElementById('chkUpc').checked,
     paginate:document.getElementById('chkPaginate').checked,
     js_render:document.getElementById('chkJs').checked,
-    login_first:document.getElementById('chkLogin').checked
+    login_first:currentTab==='login'
   };
 
   try{
@@ -238,47 +352,69 @@ async function startScrape(){
     document.getElementById('progressBar').style.width='100%';
     if(data.error){
       document.getElementById('progressText').textContent='Error: '+data.error;
-      document.getElementById('statusText').textContent='Error';
+      setStatus('Error: '+data.error,'err');
     }else{
       currentRunId=data.run_id||null;
       const products=data.products||[];
-      document.getElementById('progressText').textContent=`Done — ${products.length} products found`;
-      document.getElementById('statusText').textContent='Done';
-      showResults(products);
+      document.getElementById('progressText').textContent='Done — '+products.length+' products found';
+      setStatus('Loaded "'+extractDomain(url)+'" — '+products.length+' products.','ok');
+      showResults(products,data);
       loadHistory();
     }
   }catch(e){
     document.getElementById('progressText').textContent='Network error: '+e.message;
-    document.getElementById('statusText').textContent='Error';
+    setStatus('Network error: '+e.message,'err');
   }finally{
-    btn.disabled=false;btn.textContent='Start Scrape';
+    btn.disabled=false;btn.textContent='Scrape';
   }
 }
 
-function showResults(products){
-  const card=document.getElementById('resultsCard');
+function showResults(products,data){
+  const tbl=document.getElementById('resultsTable');
+  const bar=document.getElementById('resultsBar');
   const body=document.getElementById('resultsBody');
-  document.getElementById('emptyState').style.display='none';
-  if(!products.length){card.style.display='none';return}
-  card.style.display='block';
-  document.getElementById('resultCount').textContent=products.length+' products';
+  const diag=document.getElementById('diagCard');
+
+  document.getElementById('emptyState').style.display=products.length?'none':'block';
+  tbl.style.display=products.length?'table':'none';
+  bar.style.display=products.length?'flex':'none';
+
+  // Diagnostics
+  if(data){
+    diag.style.display='block';
+    document.getElementById('diagSupplier').textContent=data.domain||extractDomain(document.getElementById('categoryUrl').value)||'—';
+    document.getElementById('diagStrategy').textContent=data.strategy||data.mode||'None';
+    document.getElementById('diagStatus').textContent=data.status||'completed';
+    document.getElementById('diagSaved').textContent=data.created_at?new Date(data.created_at).toLocaleString():'—';
+    document.getElementById('diagRows').textContent=products.length;
+    document.getElementById('diagQuality').textContent=data.quality||'—';
+  }
+
+  document.getElementById('resultCount').textContent=products.length;
+  document.getElementById('resultMeta').textContent=data&&data.strategy?'Strategy: '+data.strategy:'';
+
+  if(!products.length)return;
   body.innerHTML=products.map(p=>`<tr>
-    <td>${p.image_url?`<img src="${esc(p.image_url)}" alt="">`:'—'}</td>
-    <td>${esc(p.product_name||'—')}</td>
+    <td>${p.image_url?'<img src="'+esc(p.image_url)+'" alt="">':'—'}</td>
+    <td>${esc(p.product_name||p.name||'—')}</td>
     <td>${esc(p.brand||'—')}</td>
+    <td>${esc(p.price||'—')}</td>
     <td>${esc(p.sku||'—')}</td>
     <td>${esc(p.upc||'—')}</td>
-    <td>${p.price||'—'}</td>
-    <td>${esc(p.pack_size||p.case_pack||'—')}</td>
+    <td>${esc(p.pack_size||'—')}</td>
+    <td>${esc(p.case_pack||'—')}</td>
+    <td>${p.url?'<a href="'+esc(p.url)+'" target="_blank" style="color:var(--gold);font-size:.75rem">Link</a>':'—'}</td>
   </tr>`).join('');
 }
 
-function clearForm(){
-  document.getElementById('loginUrl').value='';
-  document.getElementById('categoryUrl').value='';
-  document.getElementById('labelInput').value='';
-  document.getElementById('progressArea').style.display='none';
-  document.getElementById('statusText').textContent='Ready';
+function setStatus(msg,type){
+  const el=document.getElementById('statusLine');
+  const cls=type==='ok'?'status-ok':type==='err'?'status-err':'status-info';
+  el.innerHTML='<span class="'+cls+'">'+esc(msg)+'</span>';
+}
+
+function extractDomain(url){
+  try{return new URL(url).hostname}catch(e){return url}
 }
 
 async function exportXlsx(){
@@ -286,10 +422,8 @@ async function exportXlsx(){
   window.location.href='/api/export/'+currentRunId;
 }
 
-// ── Chat ────────────────────────────────────────────────────────────
-function toggleChat(){
-  document.getElementById('chatPanel').classList.toggle('open');
-}
+// ── Chat ─────────────────────────────────────────────
+function toggleChat(){document.getElementById('chatPanel').classList.toggle('open')}
 
 async function sendChat(){
   const inp=document.getElementById('chatInput');
@@ -312,9 +446,9 @@ function appendChat(role,text){
   el.scrollTop=el.scrollHeight;
 }
 
-function esc(s){if(!s)return'';return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 
-// ── Init ────────────────────────────────────────────────────────────
+// ── Init ─────────────────────────────────────────────
 loadHistory();
 </script>
 </body>
