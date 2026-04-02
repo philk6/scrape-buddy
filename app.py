@@ -15,7 +15,7 @@ Routes:
 Environment variables required:
   OPENAI_API_KEY â€” your OpenAI API key
 
-Run: python app.py â†’  http://localhost:5000
+Run: python app.py  â†’  http://localhost:5000
 """
 
 import io
@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from flask import Flask, request, jsonify, render_template, send_file
-from flask cors import CORS
+from flask_cors import CORS
 import requests as req_lib
 from openai import OpenAI
 from openpyxl import Workbook
@@ -46,16 +46,471 @@ from strategies import playwright_catalog
 from upc_providers import default_providers
 from pack_parser import enrich_all as enrich_all_pack
 
-# â”€â”€ Logging â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€B›ÙÙÚ[™Ë˜˜\ÚXÐÛÛ™šYÊBˆ]™[[ÙÙÚ[™Ë’S‘“ËBˆ›Ü›X]H‰J\ØÝ[YJ\È	J]™[˜[YJ\È	JY\ÜØYÙJ\È‹Bˆ]Y›]H‰R‰SN‰TÈ‹BŠCBƒBˆÈ8¥ 8¥ \Ù]\8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ B˜\H›\ÚÊ×Û˜[YW×ÊCBÓÔ”Ê\
-CBƒBˆÈ[š]X[\ÙHH]X˜\ÙH
-Ü™X]\ÈX›\ÈYˆ^HÛ‰Ý^\Ý
-CB™]X˜\ÙKš[š]ÙŠ
-CBƒBˆÈ8¥ 8¥ Ü[RH8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ B›Ü[˜ZWØÛY[HÜ[RJ
-CBƒBÒUÔÖTÕSWÔ“ÓTHˆˆ–[ÝH\™HH[[Ý\Ü\ÜÚ\Ý[›ÜˆHÞ[™XØ]H[X^›ÛˆX\Ý\žHTÈØÜ˜\\‹ƒBƒB•\ÈÛÛ]È\Ù\œÈ\ÝHHÝ\Y\ˆØ]YÛÜžHYÙHT“[™ØÜ˜\H›ÙXÝ]Hœ›ÛH]ƒB’]ÛÜšÜÈžH]XÝ[™ÈÜ›ÙXÝËÈ[šÜÈÛˆH\Ý[™ÈYÙH[™š\Ú][™ÈXXÚ›ÙXÝ]Z[YÙKƒB’]^˜XÝÎˆ›ÙXÝÛ˜[YKœ˜[™ÚÝK\ËšXÙKXÚ×ÜÚ^™KØ\ÙWÜXÚË[XYÙWÝ\››ÙXÝÝ\›ƒBƒB’Ù^H™Z]š[Ý\œÎƒB‹HÝ›Û™ÛH™Y™\œÈÜ›ÙXÝËÈT“ÎÈ™Z™XÝÈØÛÛXÝ[ÛœËÈ[™˜]šYØ][Ûˆ[šÜËƒB‹H\Ù\ÈHÛË\\ÜÈ\›ØXÚˆÛÛ^X]Ø\™H[šÈÛÛXÝ[Ûˆš\œÝT“[Û›H˜[˜XÚÈYˆ™YYYƒB‹HØ]™\È]™\žHØÜ˜\HÈHØØ[ÔS]H]X˜\ÙHÚ]HX™[[™[Y\Ý[\ƒB‹H™\Ý[ÈØ[ˆ™H^ÜYÈžÞœ›ÛHH™\Ý[ÈXY\ˆÜˆH\ÝÜžHÚYX˜\‹ƒBƒB’[\Ù\œÈÚ]ƒB‹HÝÈÈ\ÙHHÛÛ
-\ÝHT“Ü[Û˜[X™[ÛXÚÈØÜ˜\JCB‹HÚHØÜ˜\[™ÈZYÚ™]\›ˆ›È™\Ý[È
-˜]˜TØÜš\\™[™\™YÚ]\Ë›Ý›ÝXÝ[Û‹[\ÝX[^[Ý]ÊCB‹HÚ]XXÚ^˜XÝYšY[YX[œÈ
-TËÒÕKXÚÈÚ^™KØ\ÙHXÚÊCB‹HÝÈÈ^Ü™\Ý[ÈÈ^Ù[B‹HÝÈÈšY]Ë™[˜[YK[™[]HØ]™YØÜ˜\\È[ˆH\ÝÜžHÚYX˜\ƒB‹HÛÛ[[Ûˆ\ÜÝY\È
-[Y[Ý]Ë[\H™\Ý[ËZ\ÜÚ[™ÈTÈÜˆØ\ÙHXÚÈ]JCBƒB’ÙY\[œÝÙ\œÈÚÜ[™˜XÝXØ[ˆÈ›Ý™Y™\ˆÈH\\ÈØÜ˜\HYH8 %]\ÈHÞ[™XØ]H[X^›ÛˆX\Ý\žHTÈØÜ˜\\‹ˆˆˆƒBƒBˆÈ8¥ 8¥ [\œÈ8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ 8¥ Ð Ð¦FVböWFõöÆ&VÂ‡W&Ã¢7G"’Óâ7G# Ð¢"" Ð¢vVæW&FR‡VÖâ×&VF&ÆRÆ&VÂg&öÒU$Â²F–ÖW7F×àÐ¢Rærâ&W†×ÆRæ6öÒ(	BC£3"’ó2ó##b Ð¢"" Ð¢FöÖ–âÒW&Ç'6R‡W&Â’ææWFÆö2ç&VÖ÷fW&Vf—‚‚'wwrâ"Ð¢æ÷rÒFFWF–ÖRææ÷r‡F–ÖW¦öæRçWF2’ç7G&gF–ÖR‚"Tƒ¢TÒVBòVÒòU’"Ð¢&WGW&âb'¶FöÖ–çÒ(	B¶æ÷wÒ Ð Ð Ð¢2ÆÂ&öGV7Bf–VÆG2Â–âF—7Æ’÷&FW"àÐ¢2W6VB'’&÷F‚F†RW‡÷'BæBFòæ÷&ÖÆ—6R7G&FVw’&W7VÇG2‡v†–6‚Æ6°Ð¢2F†RæWvW"f–VÆG2’6òF†R7&VG6†VWBÇv—2†26öç6—7FVçB6öÇVÖç2àÐ¥$ôET5Eôd”TÄE2Ò°Ð¢'&öGV7EöæÖR"Â&'&æB"Â'6·R"Â'W2"ÀÐ¢'&–6R"Â'6µ÷6—¦R"Â&66U÷6²"ÀÐ¢&–ÖvU÷W&Â"Â'&öGV7E÷W&Â"ÀÐ¢2U2Vç&–6†ÖVçBÖWFFF†V×G’7G&–ærv†Vâæ÷BÆ–6&ÆRÐ¢'W5÷6÷W&6R"Â'W5öÖF6…ö6öæf–FVæ6R"Â'W5öVç&–6†VB"Â&Ö—76–æu÷W2"ÀÐ¢'W5ö6öæf–FVæ6Uö6öÆ÷""Â'W5öÖF6…÷&V6öâ"ÀÐ¢26²Vç&–6†ÖVçBÖWFFFÐ¢'&u÷6µ÷FW‡B"Â'Væ—EöÖV7W&R"Â'6µö6öæf–FVæ6R"ÀÐ¢2FWF–Â×vR7G'V7GW&VBf–VÆG0Ð¢'Væ—E÷6—¦R"Â'Væ—E÷&–6R"Â'&–6–æu÷Væ—B"ÀÐ¢2×VÇF’×7WÆ–W"W‡G&7F–öâf–VÆG0Ð¢&'VÆµ÷&–6R"Â&Ö–æ–×VÕö÷&FW%÷G’"Â'&u÷&–6U÷FW‡B"ÀÐ¥ÐÐ Ð Ð¦FVböæ÷&ÖÆ—6U÷&öGV7B‡¢F–7B’ÓâF–7C Ð¢""$Vç7W&RWfW'’&öGV7BF–7B†2WfW'’f–VÆBÂFVfVÇF–ærFòrrâ"" Ð¢&WGW&â¶f–VÆC¢ævWB†f–VÆBÂ""’f÷"f–VÆB–â$ôET5Eôd”TÄE7ÐÐ Ð Ð¦FVbö'V–ÆE÷†Ç7‚‡'Vã¢F–7B’Óâ–òä'—FW4”ó Ð¢"" Ð¢'V–ÆBâç†Ç7‚v÷&¶&öö²f÷"67&R'VâæB&WGW&â—B2'—FW4”ò'VffW"àÐ¢Æ–W2Ö–æ–ÖÂ7G–Æ–æs¢&öÆBvöÆB†VFW"&÷rÂWFò6öÇVÖâv–GF‡2àÐ¢"" Ð¢v"Òv÷&¶&öö²‚Ð¢w2Òv"æ7F—fPÐ¢w2çF—FÆRÒ%&öGV7G2 Ð Ð¢2†VFW"&÷pÐ¢†VFW'2Ò¶bç&WÆ6R‚%ò"Â""’çF—FÆR‚’f÷"b–â$ôET5Eôd”TÄE5ÐÐ¢w2æVæB††VFW'2Ð Ð¢27G–ÆRF†R†VFW"&÷s¢&öÆBÂvöÆBf–ÆÂÂF&²FW‡@Ð¢vöÆEöf–ÆÂÒGFW&äf–ÆÂ‚'6öÆ–B"Âft6öÆ÷#Ò$3”ƒD2"Ð¢&öÆEöföçBÒföçB†&öÆCÕG'VRÂ6öÆ÷#Ò###""Ð¢f÷"6VÆÂ–âw5³Ó Ð¢6VÆÂæf–ÆÂÒvöÆEöf–ÆÀÐ¢6VÆÂæföçBÒ&öÆEöföç@Ð¢6VÆÂæÆ–væÖVçBÒÆ–væÖVçB††÷&—¦öçFÃÒ&6VçFW""Ð Ð¢2FF&÷w0Ð¢f÷"&öGV7B–â'VâævWB‚'&öGV7G2"ÂµÒ“ Ð¢Òöæ÷&ÖÆ—6U÷&öGV7B‡&öGV7BÐ¢w2æVæB…·¶f–VÆEÒf÷"f–VÆB–â$ôET5Eôd”TÄE5ÒÐ Ð¢2WFò×6—¦R6öÇVÖç2‡&÷Vv‚†WW&—7F–3¢Ö‚öb†VFW"ÆVæwF‚æBf—'7B#fÇVW2Ð¢f÷"6öÅö–G‚Âf–VÆB–âVçVÖW&FR…$ôET5Eôd”TÄE2Â7F'CÓ“ Ð¢6öÅöÆWGFW"Òw2æ6VÆÂ‡&÷sÓÂ6öÇVÖãÖ6öÅö–G‚’æ6öÇVÖåöÆWGFW Ð¢Ö…öÆVâÒÆVâ††VFW'5¶6öÅö–G‚ÒÒÐ¢f÷"&÷r–âw2æ—FW%÷&÷w2†Ö–å÷&÷sÓ"ÂÖ…÷&÷sÖÖ–â‡w2æÖ…÷&÷rÂ#’ÂÖ–åö6öÃÖ6öÅö–G‚ÂÖ…ö6öÃÖ6öÅö–G‚“ Ð¢f÷"6VÆÂ–â&÷s Ð¢–b6VÆÂçfÇVS Ð¢Ö…öÆVâÒÖ‚†Ö…öÆVâÂÆVâ‡7G"†6VÆÂçfÇVR’’Ð¢w2æ6öÇVÖåöF–ÖVç6–öç5¶6öÅöÆWGFW%Òçv–GF‚ÒÖ–â†Ö…öÆVâ²2ÂSÐ Ð¢'VbÒ–òä'—FW4”ò‚Ð¢v"ç6fR†'VbÐ¢'Vbç6VV²ƒÐ¢&WGW&â'V`Ð Ð Ð¢2)H)H&6¶w&÷VæBv÷&¶W'2)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)HÐ Ð¦FVb÷'Vå÷67&U÷v÷&¶W"‡'Våö–C¢–çBÂW&Ã¢7G"Â‡FÖÃ¢7G"ÂW6U÷Æ—w&–v‡C¢&ööÂÒfÇ6R’ÓâæöæS Ð¢"" Ð¢'Vâ67&–ær7G&FVv–W2²Vç&–6†ÖVçB–â&6¶w&÷VæBF‡&VBàÐ¢6ÆÇ2FF&6Ræ6ö×ÆWFU÷'Vâ‚’öâ7V66W72÷"FF&6Ræf–Å÷'Vâ‚’öâW'&÷"àÐ¢"" Ð¢G'“ Ð¢&W7VÇBÒ'Våö&W7E÷7G&FVw’†‡FÖÂÂW&ÂÂW6U÷Æ—w&–v‡C×W6U÷Æ—w&–v‡BÐ¢Vç&–6…öÆÅ÷6²‡&W7VÇE²'&öGV7G2%ÒÐ¢&W7VÇE²'&öGV7G2%ÒÒW5öVç&–6†ÖVçBæVç&–6…÷&öGV7G5÷W2€Ð¢&W7VÇE²'&öGV7G2%ÒÂ&÷f–FW'3ÖFVfVÇE÷&÷f–FW'2‚Ð¢Ð Ð¢2)H)HFFVÆ—G’ÖWG&–72)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)HÐ¢&öGV7G2Ò&W7VÇE²'&öGV7G2%ÐÐ¢F÷FÂÒÆVâ‡&öGV7G2Ð¢–bF÷FÂâ Ð¢†5öæÖRÒ7VÒƒf÷"–â&öGV7G2–bævWB‚'&öGV7EöæÖR"’Ð¢†5÷&–6RÒ7VÒƒf÷"–â&öGV7G2–bævWB‚'&–6R"’Ð¢†5÷W2Ò7VÒƒf÷"–â&öGV7G2–bævWB‚'W2"’Ð Ð¢æÖU÷7BÒ†5öæÖRòF÷FÂ¢Ð¢&–6U÷7BÒ†5÷&–6RòF÷FÂ¢Ð Ð¢VÆ—G•÷v&æ–æw2ÒµÐÐ¢–bæÖU÷7BÂS Ð¢VÆ—G•÷v&æ–æw2æVæB†b$öæÇ’¶æÖU÷7C¢ãgÒRöb&öGV7G2†fRæÖW2"Ð¢–b&–6U÷7BÂS Ð¢VÆ—G•÷v&æ–æw2æVæB†b$öæÇ’·&–6U÷7C¢ãgÒRöb&öGV7G2†fR&–6W2"Ð Ð¢2FWFV7B'6ÖR&–6R"'Vs¢–bãƒRöb&öGV7G26†&RF†R6ÖR&–6PÐ¢–b†5÷&–6RãÒ3 Ð¢g&öÒ6öÆÆV7F–öç2–×÷'B6÷VçFW Ð¢&–6Uö6÷VçG2Ò6÷VçFW"‡ævWB‚'&–6R"Â""’f÷"–â&öGV7G2–bævWB‚'&–6R"’Ð¢Ö÷7Eö6öÖÖöå÷&–6RÂÖ÷7Eö6öÖÖöåö6÷VçBÒ&–6Uö6÷VçG2æÖ÷7Eö6öÖÖöâƒ•³ÐÐ¢–bÖ÷7Eö6öÖÖöåö6÷VçBò†5÷&–6Râã‚æB†5÷&–6RâS Ð¢VÆ—G•÷v&æ–æw2æVæB€Ð¢b%t$ä”äs¢¶Ö÷7Eö6öÖÖöåö6÷VçGÒ÷¶†5÷&–6WÒ&öGV7G26†&RF†R6ÖR&–6R Ð¢b"‡¶Ö÷7Eö6öÖÖöå÷&–6WÒ’(	BÆ–¶VÇ’67&–ær'Vr Ð¢Ð Ð¢–bVÆ—G•÷v&æ–æw3 Ð¢Æövv–ærçv&æ–ær€Ð¢b%´¦ö"·'Våö–GÕÒFFVÆ—G’—77VW2FWFV7FVC¥Æâ"°Ð¢%Æâ"æ¦ö–â‡VÆ—G•÷v&æ–æw2Ð¢Ð Ð¢Æövv–æræ–æfò€Ð¢b%´¦ö"·'Våö–GÕÒVÆ—G“¢¶†5öæÖWÒ÷·F÷FÇÒæÖW2‡¶æÖU÷7C¢ãgÒR’Â Ð¢b'¶†5÷&–6WÒ÷·F÷FÇÒ&–6W2‡·&–6U÷7C¢ãgÒR’Â Ð¢b'¶†5÷W7Ò÷·F÷FÇÒU72‡¶†5÷W2÷F÷FÂ£¢ãgÒR’ Ð¢Ð Ð¢FF&6Ræ6ö×ÆWFU÷'Vâ€Ð¢'Våö–C×'Våö–BÀÐ¢7G&FVw•ö–C×&W7VÇE²'7G&FVw•ö–B%ÒÀÐ¢7G&FVw•öæÖS×&W7VÇE²'7G&FVw•öæÖR%ÒÀÐ¢&öGV7G3×&W7VÇE²'&öGV7G2%ÒÀÐ¢Ð¢Æövv–æræ–æfò€Ð¢b%´¦ö"·'Våö–GÕÒ6ö×ÆWFVB(	B¶ÆVâ‡&W7VÇE²w&öGV7G2uÒ—Ò&öGV7B‡2’ Ð¢Ð¢W†6WBW†6WF–öâ2S Ð¢Æövv–æræW†6WF–öâ†b%´¦ö"·'Våö–GÕÒ67&Rv÷&¶W"f–ÆVB"Ð¢FF&6Ræf–Å÷'Vâ‡'Våö–BÂ7G"†R’Ð Ð Ð¦FVb÷'VåöWF…÷67&U÷v÷&¶W"€Ð¢'Våö–C¢–çBÂW&Ã¢7G"Â7FFUöf–ÆS¢7G"Â6W76–öåö–C¢7G Ð¢’ÓâæöæS Ð¢"" Ð¢'VââWF†VçF–6FVBÆ—w&–v‡B6FÆör67&R–â&6¶w&÷VæBF‡&VBàÐ Ð¢–×÷'FçC¢¶VWF†RWF†VçF–6FVB7WÆ–W"—VÆ–æR&6VBöâ7WÆ–W"×f—6–&ÆPÐ¢FFöæÇ’âFòæ÷B'VâW‡FW&æÂU2Vç&–6†ÖVçB†W&R&V6W6R—B6â÷fW'w&—FPÐ¢÷"Ö6²F†R&VÂFWF–Â×vRfÇVW2GW&–æræ76RöÆöv–â†&FVæ–æràÐ¢"" Ð¢G'“ Ð¢&öGV7G2ÒÆ—w&–v‡Eö6FÆörç'Vâ‡7FFUöf–ÆRÂW&ÂÐ¢Vç&–6…öÆÅ÷6²‡&öGV7G2Ð¢FF&6Ræ6ö×ÆWFU÷'Vâ€Ð¢'Våö–C×'Våö–BÀÐ¢7G&FVw•ö–C×Æ—w&–v‡Eö6FÆörä”BÀÐ¢7G&FVw•öæÖS×Æ—w&–v‡Eö6FÆörääÔRÀÐ¢&öGV7G3×&öGV7G2ÀÐ¢Ð¢Æövv–æræ–æfò€Ð¢b%´¦ö"·'Våö–GÕÒWF‚67&R6ö×ÆWFVBÒ¶ÆVâ‡&öGV7G2—Ò&öGV7B‡2’ Ð¢Ð¢W†6WBW†6WF–öâ2S Ð¢Æövv–æræW†6WF–öâ†b%´¦ö"·'Våö–GÕÒWF‚67&Rv÷&¶W"f–ÆVB"Ð¢FF&6Ræf–Å÷'Vâ‡'Våö–BÂ7G"†R’Ð¢f–æÆÇ“ Ð¢'&÷w6W%öÆöv–âæf–æ—6…÷6W76–öâ‡6W76–öåö–BÐ Ð Ð¢2)H)H&÷WFW2)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H)H4(4)…ÁÀ¹É½ÕÑ” ˆ¼ˆ¤4)‘•˜¥¹‘•à ¤è4(€€€É•ÑÕÉ¸É•¹‘•É}Ñ•µÁ±…Ñ” ‰¥¹‘•à¹¡Ñµ°ˆ¤4(4(4)…ÁÀ¹É½ÕÑ” ˆ½…Á¤½ÍÉ…Á”ˆ°µ•Ñ¡½‘Ìõl‰A=MP‰t¤4)‘•˜ÍÉ…Á” ¤è4(€€€€ˆˆˆ4(€€€MÑ…ÉÐ„‰…­É½Õ¹ÍÉ…Á”©½ˆ…¹É•ÑÕÉ¸¥µµ•‘¥…Ñ•±ä¸4(4(€€€I•ÅÕ•ÍÐ‰½‘äè4(€€€€€€€ì€‰ÕÉ°ˆè€‰¡ÑÑÁÌè¼½à¸¸¸ˆ°€‰±…‰•°ˆè€‰=ÁÑ¥½¹…°±…‰•°ˆô4(4(€€€I•ÍÁ½¹Í”€¡¥µµ•‘¥…Ñ”ƒŠP©½ˆÍÑ¥±°ÉÕ¹¹¥¹œ¤è4(€€€€€€€ì€‰ÉÕ¹}¥ˆè€ÄÈÌ°€‰±…‰•°ˆè€ˆ¸¸¸ˆ°€‰ÍÑ…ÑÕÌˆè€‰ÉÕ¹¹¥¹œˆô4(4(€€€Q¡”¡¥ÍÑ½Éä•¹ÑÉä…ÁÁ•…ÉÌÉ¥¡Ð…Ý…äìÁ½±°P€€½…Á¤½¡¥ÍÑ½Éä™½ÈÕÁ‘…Ñ•Ì¸4(€€€€ˆˆˆ4(€€€‘…Ñ„€ôÉ•ÅÕ•ÍÐ¹•Ñ}©Í½¸¡Í¥±•¹ÐõQÉÕ”¤4(€€€¥˜¹½Ð‘…Ñ„½È¹½Ð‘…Ñ„¹•Ð ‰ÕÉ°ˆ¤è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰5¥ÍÍ¥¹œ€ÕÉ°œ¥¸É•ÅÕ•ÍÐ‰½‘ä¸‰ô¤°€ÐÀÀ4(4(€€€ÕÉ°€ô‘…Ñ…l‰ÕÉ°‰t¹ÍÑÉ¥À ¤4(€€€Á…ÉÍ•€ôÕÉ±Á…ÉÍ”¡ÕÉ°¤4(€€€¥˜Á…ÉÍ•¹Í¡•µ”¹½Ð¥¸€ ‰¡ÑÑÀˆ°€‰¡ÑÑÁÌˆ¤è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰UI0µÕÍÐÍÑ…ÉÐÝ¥Ñ ¡ÑÑÀè¼¼½È¡ÑÑÁÌè¼¼‰ô¤°€ÐÀÀ4(4(€€€±…‰•°€ô€¡‘…Ñ„¹•Ð ‰±…‰•°ˆ¤½È€ˆˆ¤¹ÍÑÉ¥À ¤½È}…ÕÑ½}±…‰•°¡ÕÉ°¤4(4(€€€€Œ•Ñ !Q50Íå¹¡É½¹½ÕÍ±äƒŠP™…ÍÐ¹•ÑÝ½É¬…±°°¹½ÐÑ¡”Í±½ÜÁ…ÉÐ¸4(€€€€Œ%˜É•ÅÕ•ÍÑÌ™…¥±Ì½È!Q50±½½­Ì•µÁÑä½‰±½­•°ÑÉäA±…åÝÉ¥¡Ð…Ì™…±±‰…¬¸4(€€€¡Ñµ°€ô9½¹”4(€€€™•Ñ¡}•ÉÉ½È€ô9½¹”4(4(€€€ÑÉäè4(€€€€€€€¡Ñµ°€ô™•Ñ¡}¡Ñµ°¡ÕÉ°¤4(€€€•á•ÁÐá•ÁÑ¥½¸…Ì”è4(€€€€€€€™•Ñ¡}•ÉÉ½È€ô”4(€€€€€€€±½¥¹œ¹Ý…É¹¥¹œ¡˜‰mMÉ…Á•tÉ•ÅÕ•ÍÑÌ™•Ñ ™…¥±•èí•ôƒŠPÝ¥±°ÑÉäA±…åÝÉ¥¡Ðˆ¤4(4(€€€€Œ•Ñ•Éµ¥¹”¥˜Ý”¹••A±…åÝÉ¥¡Ð€¡™•Ñ ™…¥±•°‰±½­•°½È)LµÉ•¹‘•É•¤4(€€€ÕÍ•‘}Á±…åÝÉ¥¡Ð€ô…±Í”4(€€€¹••‘Í}Á±…åÝÉ¥¡Ð€ô¡Ñµ°¥Ì9½¹”4(€€€¥˜¡Ñµ°è4(€€€€€€€±½Ý•É}¡Ñµ°€ô¡Ñµ°¹±½Ý•È ¤4(€€€€€€€Í½ÕÁ}¡•¬€ô	•…ÕÑ¥™Õ±M½ÕÀ¡¡Ñµ°°€¡Ñµ°¹Á…ÉÍ•Èœ¤4(€€€€€€€‰½‘å}Ñ•áÑ}±•¸€ô±•¸¡Í½ÕÁ}¡•¬¹•Ñ}Ñ•áÐ¡ÍÑÉ¥ÀõQÉÕ”¤¤¥˜Í½ÕÁ}¡•¬¹‰½‘ä•±Í”€À4(€€€€€€€¥Í}‰±½­•€ô…¹ä¡Á¡É…Í”¥¸±½Ý•É}¡Ñµ°™½ÈÁ¡É…Í”¥¸l4(€€€€€€€€€€€€‰…•ÍÌ‘•¹¥•ˆ°€ˆÐÀÌ™½É‰¥‘‘•¸ˆ°€‰…ÁÑ¡„ˆ°€‰…É”å½Ô„É½‰½Ðˆ°4(€€€€€€€€€€€€‰Á±•…Í”•¹…‰±”©…Ù…ÍÉ¥ÁÐˆ°€‰¡•­¥¹œå½ÕÈ‰É½ÝÍ•Èˆ°4(€€€€€€€t¤4(€€€€€€€€Œ¡•¬™½È)L™É…µ•Ý½É¬Ñ¡…ÐÉ•¹‘•ÉÌÁÉ½‘ÕÑÌ±¥•¹ÐµÍ¥‘”4(€€€€€€€¥Í}©Í}É•¹‘•É•€ô…¹ä¡Í¥œ¥¸¡Ñµ°™½ÈÍ¥œ¥¸l4(€€€€€€€€€€€€‘…Ñ„µ‰¥¹ôœ°€­¼¹…ÁÁ±å	¥¹‘¥¹Ìœ°€¹œµ…ÁÀœ°€¹œµ½¹ÑÉ½±±•Èœ°4(€€€€€€€€€€€€}}9aQ}Q}|œ°€‘…Ñ„µÉ•…ÑÉ½½Ðœ°4(€€€€€€€t¤4(€€€€€€€€Œ%˜ÁÉ½‘ÕÑÌ•á¥ÍÐ¥¸!Q50‰ÕÐÁÉ¥•Ì…É”µ¥ÍÍ¥¹œ°)LÉ•¹‘•É¥¹œ¥Ì±¥­•±ä¹••‘•4(€€€€€€€¡…Í}ÁÉ½‘ÕÑ}±…ÍÍ•Ì€ô‰½½°¡Í½ÕÁ}¡•¬¹™¥¹¡…ÑÑÉÌõì‰±…ÍÌˆè±…µ‰‘„ŒèŒ…¹…¹ä 4(€€€€€€€€€€€­Ü¥¸Œ™½È­Ü¥¸l‰ÁÉ½‘ÕÐˆ°€‰¥Ñ•´ˆ°€‰…É‰t4(€€€€€€€€¤¥˜¥Í¥¹ÍÑ…¹”¡Œ°±¥ÍÐ¤•±Í”…±Í•ô¤¤4(€€€€€€€¡…Í}ÁÉ¥•Ì€ô‰½½°¡Í½ÕÁ}¡•¬¹™¥¹¡ÍÑÉ¥¹œõ±…µ‰‘„ÌèÌ…¹€œœ¥¸Ì¤¤4(€€€€€€€ÁÉ½‘ÕÑÍ}‰ÕÑ}¹½}ÁÉ¥•Ì€ô¡…Í}ÁÉ½‘ÕÑ}±…ÍÍ•Ì…¹¹½Ð¡…Í}ÁÉ¥•Ì4(4(€€€€€€€¥˜‰½‘å}Ñ•áÑ}±•¸€ð€ÔÀÀ½È¥Í}‰±½­•½È¥Í}©Í}É•¹‘•É•½ÈÁÉ½‘ÕÑÍ}‰ÕÑ}¹½}ÁÉ¥•Ìè4(€€€€€€€€€€€¹••‘Í}Á±…åÝÉ¥¡Ð€ôQÉÕ”4(4(€€€¥˜¹••‘Í}Á±…åÝÉ¥¡Ðè4(€€€€€€€ÑÉäè4(€€€€€€€€€€€™É½´ÍÉ…Á•È¥µÁ½ÉÐ™•Ñ¡}¡Ñµ±}Á±…åÝÉ¥¡Ð4(€€€€€€€€€€€ÁÝ}¡Ñµ°€ô™•Ñ¡}¡Ñµ±}Á±…åÝÉ¥¡Ð¡ÕÉ°°Ý…¥Ñ}µÌôÐÀÀÀ¤4(€€€€€€€€€€€¥˜ÁÝ}¡Ñµ°…¹€¡¡Ñµ°¥Ì9½¹”½È±•¸¡ÁÝ}¡Ñµ°¤€ø±•¸¡¡Ñµ°½È€œœ¤€¬€ÈÀÀ¤è4(€€€€€€€€€€€€€€€±½¥¹œ¹¥¹™¼ 4(€€€€€€€€€€€€€€€€€€€˜‰mMÉ…Á•tA±…åÝÉ¥¡ÐÁÉ½‘Õ•ì¥¹¥Ñ¥…°œ¥˜¡Ñµ°¥Ì9½¹”•±Í”€µ½É”ô½¹Ñ•¹Ð€ˆ4(€€€€€€€€€€€€€€€€€€€˜ˆ¡í±•¸¡ÁÝ}¡Ñµ°¥ô¡…ÉÍí˜œÙÌí±•¸¡¡Ñµ°¥ô™É½´É•ÅÕ•ÍÑÌœ¥˜¡Ñµ°•±Í”€œô¤ˆ4(€€€€€€€€€€€€€€€€¤4(€€€€€€€€€€€€€€€¡Ñµ°€ôÁÝ}¡Ñµ°4(€€€€€€€€€€€€€€€ÕÍ•‘}Á±…åÝÉ¥¡Ð€ôQÉÕ”4(€€€€€€€€€€€€€€€™•Ñ¡}•ÉÉ½È€ô9½¹”4(€€€€€€€•á•ÁÐá•ÁÑ¥½¸…Ì”è4(€€€€€€€€€€€±½¥¹œ¹Ý…É¹¥¹œ¡˜‰mMÉ…Á•tA±…åÝÉ¥¡Ð™…±±‰…¬™…¥±•èí•ôˆ¤4(4(€€€€Œ%˜Ý”ÍÑ¥±°¡…Ù”¹¼!Q50°É•ÑÕÉ¸•ÉÉ½È4(€€€¥˜¹½Ð¡Ñµ°è4(€€€€€€€¥˜™•Ñ¡}•ÉÉ½Èè4(€€€€€€€€€€€¥˜€Q¥µ•½ÕÐœ¥¸ÑåÁ”¡™•Ñ¡}•ÉÉ½È¤¹}}¹…µ•}|è4(€€€€€€€€€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰I•ÅÕ•ÍÐÑ¥µ•½ÕÐ¸‰ô¤°€ÔÀÐ4(€€€€€€€€4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè˜‰…¥±•Ñ¼™•Ñ Á…”èí™•Ñ¡}•ÉÉ½Éô‰ô¤°€ÔÀÈ4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰½Õ±¹½Ð™•Ñ Á…”½¹Ñ•¹Ð¸‰ô¤°€ÔÀÈ4(4(€€€€ŒÉ•…Ñ”Ñ¡”¡¥ÍÑ½ÉäÉ•½É¥µµ•‘¥…Ñ•±äÍ¼¥ÐÍ¡½ÝÌÕÀ¥¸Ñ¡”Í¥‘•‰…È4(€€€ÉÕ¹}¥€ô‘…Ñ…‰…Í”¹É•…Ñ•}ÉÕ¸¡±…‰•°õ±…‰•°°Í½ÕÉ•}ÕÉ°õÕÉ°¤4(4(€€€€Œ1…Õ¹ Ñ¡”Í±½ÜÝ½É¬€¡Á…ÉÍ¥¹œ€¬•¹É¥¡µ•¹Ð€¬ÝÉ¥Ñ”¤¥¸Ñ¡”‰…­É½Õ¹4(€€€Ñ¡É•…‘¥¹œ¹Q¡É•… 4(€€€€€€€Ñ…É•Ðõ}ÉÕ¹}ÍÉ…Á•}Ý½É­•È°4(€€€€€€€…ÉÌô¡ÉÕ¹}¥°ÕÉ°°¡Ñµ°°ÕÍ•‘}Á±…åÝÉ¥¡Ð¤°4(€€€€€€€‘…•µ½¸õQÉÕ”°4(€€€€€€€¹…µ”õ˜‰ÍÉ…Á”µíÉÕ¹}¥‘ôˆ°4(€€€€¤¹ÍÑ…ÉÐ ¤4(4(€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰ÉÕ¹}¥ˆèÉÕ¹}¥°€‰±…‰•°ˆè±…‰•°°€‰ÍÑ…ÑÕÌˆè€‰ÉÕ¹¹¥¹œ‰ô¤4(4(4)…ÁÀ¹É½ÕÑ” ˆ½…Á¤½¡¥ÍÑ½Éäˆ°µ•Ñ¡½‘Ìõl‰P‰t¤4)‘•˜¡¥ÍÑ½Éå}±¥ÍÐ ¤è4(€€€€ˆˆ‰I•ÑÕÉ¸…±°ÍÉ…Á”ÉÕ¹Ì°¹•Ý•ÍÐ™¥ÉÍÐ€¡¹¼ÁÉ½‘ÕÐÉ½ÝÌ¤¸ˆˆˆ4(€€€É•ÑÕÉ¸©Í½¹¥™ä¡‘…Ñ…‰…Í”¹•Ñ}¡¥ÍÑ½Éä ¤¤4(4(4)…ÁÀ¹É½ÕÑ” ˆ½…Á¤½¡¥ÍÑ½Éä¼ñ¥¹ÐéÉÕ¹}¥øˆ°µ•Ñ¡½‘Ìõl‰P‰t¤4)‘•˜¡¥ÍÑ½Éå}•Ð¡ÉÕ¹}¥¤è4(€€€€ˆˆ‰I•ÑÕÉ¸„Í¥¹±”ÍÉ…Á”ÉÕ¸¥¹±Õ‘¥¹œ…±°¥ÑÌÁÉ½‘ÕÐÉ½ÝÌ¸ˆˆˆ4(€€€ÉÕ¸€ô‘…Ñ…‰…Í”¹•Ñ}ÉÕ¸¡ÉÕ¹}¥¤4(€€€¥˜ÉÕ¸¥Ì9½¹”è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰IÕ¸¹½Ð™½Õ¹¸‰ô¤°€ÐÀÐ4(€€€É•ÑÕÉ¸©Í½¹¥™ä¡ÉÕ¸¤4(4(4)…ÁÀ¹É½ÕÑ” ˆ½…Á¤½¡¥ÍÑ½Éä¼ñ¥¹ÐéÉÕ¹}¥øˆ°µ•Ñ¡½‘Ìõl‰AQ ‰t¤4)‘•˜¡¥ÍÑ½Éå}É•¹…µ”¡ÉÕ¹}¥¤è4(€€€€ˆˆˆ4(€€€I•¹…µ”„ÍÉ…Á”ÉÕ¸¸4(€€€I•ÅÕ•ÍÐ‰½‘äèì€‰±…‰•°ˆè€‰9•Ü±…‰•°ˆô4(€€€€ˆˆˆ4(€€€‘…Ñ„€ôÉ•ÅÕ•ÍÐ¹•Ñ}©Í½¸¡Í¥±•¹ÐõQÉÕ”¤4(€€€¥˜¹½Ð‘…Ñ„½È¹½Ð‘…Ñ„¹•Ð ‰±…‰•°ˆ°€ˆˆ¤¹ÍÑÉ¥À ¤è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰5¥ÍÍ¥¹œ€±…‰•°œ¸‰ô¤°€ÐÀÀ4(€€€ÕÁ‘…Ñ•€ô‘…Ñ…‰…Í”¹ÕÁ‘…Ñ•}±…‰•°¡ÉÕ¹}¥°‘…Ñ…l‰±…‰•°‰t¤4(€€€¥˜¹½ÐÕÁ‘…Ñ•è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰IÕ¸¹½Ð™½Õ¹¸‰ô¤°€ÐÀÐ4(€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰½¬ˆèQÉÕ•ô¤4(4(4)…ÁÀ¹É½ÕÑ” ˆ½…Á¤½¡¥ÍÑ½Éä¼ñ¥¹ÐéÉÕ¹}¥øˆ°µ•Ñ¡½‘Ìõl‰1Q‰t¤4)‘•˜¡¥ÍÑ½Éå}‘•±•Ñ”¡ÉÕ¹}¥¤è4(€€€€ˆˆ‰•±•Ñ”„ÍÉ…Á”ÉÕ¸…¹…±°¥ÑÌÁÉ½‘ÕÑÌ¸ˆˆˆ4(€€€‘•±•Ñ•€ô‘…Ñ…‰…Í”¹‘•±•Ñ•}ÉÕ¸¡ÉÕ¹}¥¤4(€€€¥˜¹½Ð‘•±•Ñ•è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰IÕ¸¹½Ð™½Õ¹¸‰ô¤°€ÐÀÐ4(€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰½¬ˆèQÉÕ•ô¤4(4(4)…ÁÀ¹É½ÕÑ” ˆ½…Á¤½•áÁ½ÉÐ¼ñ¥¹ÐéÉÕ¹}¥øˆ°µ•Ñ¡½‘Ìõl‰P‰t¤4)‘•˜•áÁ½ÉÑ}á±Íà¡ÉÕ¹}¥¤è4(€€€€ˆˆˆ4(€€€½Ý¹±½…„ÍÉ…Á”ÉÕ¸…Ì…¸€¹á±Íà™¥±”¸4(€€€Q¡”™¥±•¹…µ”¥Ì‘•É¥Ù•™É½´Ñ¡”ÉÕ¸±…‰•°¸4(€€€€ˆˆˆ4(€€€ÉÕ¸€ô‘…Ñ…‰…Í”¹•Ñ}ÉÕ¸¡ÉÕ¹}¥¤4(€€€¥˜ÉÕ¸¥Ì9½¹”è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰IÕ¸¹½Ð™½Õ¹¸‰ô¤°€ÐÀÐ4(4(€€€‰Õ˜€ô}‰Õ¥±‘}á±Íà¡ÉÕ¸¤4(4(€€€€Œ	Õ¥±„Í…™”™¥±•¹…µ”™É½´Ñ¡”±…‰•°4(€€€Í…™•}±…‰•°€ô€ˆˆ¹©½¥¸¡Œ¥˜Œ¹¥Í…±¹Õ´ ¤½ÈŒ¥¸€ˆ€µ|ˆ•±Í”€‰|ˆ™½ÈŒ¥¸ÉÕ¹l‰±…‰•°‰t¤4(€€€™¥±•¹…µ”€ô˜‰íÍ…™•}±…‰•±lèØÁuô¹á±Íàˆ4(4(€€€É•ÑÕÉ¸Í•¹‘}™¥±” 4(€€€€€€€‰Õ˜°4(€€€€€€€…Í}…ÑÑ…¡µ•¹ÐõQÉÕ”°4(€€€€€€€‘½Ý¹±½…‘}¹…µ”õ™¥±•¹…µ”°4(€€€€€€€µ¥µ•ÑåÁ”ô‰…ÁÁ±¥…Ñ¥½¸½Ù¹¹½Á•¹áµ±™½Éµ…ÑÌµ½™™¥•‘½Õµ•¹Ð¹ÍÁÉ•…‘Í¡••Ñµ°¹Í¡••Ðˆ°4(€€€€¤4(4(4)…ÁÀ¹É½ÕÑ” ˆ½…Á¤½…ÕÑ ½ÍÑ…ÉÐˆ°µ•Ñ¡½‘Ìõl‰A=MP‰t¤4)‘•˜…ÕÑ¡}ÍÑ…ÉÐ ¤è4(€€€€ˆˆˆ4(€€€=Á•¸„Ù¥Í¥‰±”‰É½ÝÍ•È…ÐÑ¡”±½¥¸UI0Í¼Ñ¡”ÕÍ•È…¸±½œ¥¸µ…¹Õ…±±ä¸4(”…B‘H4QEÕ•ÍÐ‰½‘äèì€‰±½¥¹}ÕÉ°ˆè€‰¡ÑÑÁÌè¼½ÍÕÁÁ±¥•È¹½´½±½¥¸ˆô4(€€€I•ÍÁ½¹Í”è€€€€ì€‰Í•ÍÍ¥½¹}¥ˆè€‰…‰ŒÄÈÌˆ°€‰ÍÑ…ÑÕÌˆè€‰Ý…¥Ñ¥¹œˆô4(€€€€ˆˆˆ4(€€€‘…Ñ„€ôÉ•ÅÕ•ÍÐ¹•Ñ}©Í½¸¡Í¥±•¹ÐõQÉÕ”¤4(€€€¥˜¹½Ð‘…Ñ„½È¹½Ð‘…Ñ„¹•Ð ‰±½¥¹}ÕÉ°ˆ¤è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰5¥ÍÍ¥¹œ€±½¥¹}ÕÉ°œ¸‰ô¤°€ÐÀÀ4(4(€€€±½¥¹}ÕÉ°€ô‘…Ñ…l‰±½¥¹}ÕÉ°‰t¹ÍÑÉ¥À ¤4(€€€¥˜ÕÉ±Á…ÉÍ”¡±½¥¹}ÕÉ°¤¹Í¡•µ”¹½Ð¥¸€ ‰¡ÑÑÀˆ°€‰¡ÑÑÁÌˆ¤è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰±½¥¹}ÕÉ°µÕÍÐÍÑ…ÉÐÝ¥Ñ ¡ÑÑÀè¼¼½È¡ÑÑÁÌè¼¼‰ô¤°€ÐÀÀ4(4(€€€ÑÉäè4(€€€€€€€Í•ÍÍ¥½¹}¥€ô‰É½ÝÍ•É}±½¥¸¹ÍÑ…ÉÑ}Í•ÍÍ¥½¸¡±½¥¹}ÕÉ°¤4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰Í•ÍÍ¥½¹}¥ˆèÍ•ÍÍ¥½¹}¥°€‰ÍÑ…ÑÕÌˆè€‰Ý…¥Ñ¥¹œ‰ô¤4(€€€•á•ÁÐIÕ¹Ñ¥µ•ÉÉ½È…Ì”è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½ÈˆèÍÑÈ¡”¥ô¤°€ÔÀÀ4(€€€•á•ÁÐá•ÁÑ¥½¸…Ì”è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè˜‰…¥±•Ñ¼½Á•¸‰É½ÝÍ•Èèí•ô‰ô¤°€ÔÀÀ4(4(4)…ÁÀ¹É½ÕÑ” ˆ½…Á¤½…ÕÑ ½ÍÉ…Á”ˆ°µ•Ñ¡½‘Ìõl‰A=MP‰t¤4)‘•˜…ÕÑ¡}ÍÉ…Á” ¤è4(€€€€ˆˆˆ4(€€€½¹™¥É´Ñ¡”±½¥¸Í•ÍÍ¥½¸…¹ÉÕ¸„™Õ±°A±…åÝÉ¥¡Ðµ‰…Í•…Ñ…±½œÉ…Ý°¸4(4(€€€½¹™¥É´Ñ¡”±½¥¸Í•ÍÍ¥½¸°Ñ¡•¸±…Õ¹ Ñ¡”A±…åÝÉ¥¡Ð…Ñ…±½œÉ…Ý°¥¸4(€€€Ñ¡”‰…­É½Õ¹…¹É•ÑÕÉ¸¥µµ•‘¥…Ñ•±ä¸4(4(€€€±½Üè4(€€€€€€Ä¸½¹™¥Éµ}Í•ÍÍ¥½¸ ¤ƒŠPÍå¹¡É½¹½ÕÌè‰É½ÝÍ•ÈÑ¡É•…Í…Ù•Ì½½­¥•ÌÑ¼„4(€€€€€€€€Ñ•µÀ™¥±”…¹±½Í•ÌÑ¡”Ù¥Í¥‰±”±½¥¸‰É½ÝÍ•È€¡ÑåÁ¥…±±ä€ËŠTÔÌ¤¸4(€€€€€€È¸É•…Ñ•}ÉÕ¸ ¤€€€€€€ƒŠP¡¥ÍÑ½Éä•¹ÑÉä…ÁÁ•…ÉÌ¥¸Ñ¡”Í¥‘•‰…ÈÉ¥¡Ð…Ý…ä¸4(€€€€€€Ì¸	…­É½Õ¹Ñ¡É•…ƒŠPÉÕ¹ÌÁ±…åÝÉ¥¡Ñ}…Ñ…±½œ¹ÉÕ¸ ¤°•¹É¥¡µ•¹Ð°…¹4(€€€€€€€€½µÁ±•Ñ•}ÉÕ¸ ¤€¼™…¥±}ÉÕ¸ ¤¸M•ÍÍ¥½¸±•…¹ÕÀ…±Ý…åÌ¡…ÁÁ•¹Ì¡•É”¸4(€€€€€€Ð¸I•ÑÕÉ¹Ì¥µµ•‘¥…Ñ•±äÝ¥Ñ ìÉÕ¹}¥°±…‰•°°ÍÑ…ÑÕÌè€‰ÉÕ¹¹¥¹œˆô¸4(4(€€€I•ÅÕ•ÍÐ‰½‘äèì€‰Í•ÍÍ¥½¹}¥ˆè€ˆ¸¸¸ˆ°€‰ÕÉ°ˆè€‰¡ÑÑÁÌè¼¼¸¸¸ˆ°€‰±…‰•°ˆè€‰=ÁÑ¥½¹…°ˆô4(€€€I•ÍÁ½¹Í”è€€€€ì€‰ÉÕ¹}¥ˆè€ÄÈÌ°€‰±…‰•°ˆè€ˆ¸¸¸ˆ°€‰ÍÑ…ÑÕÌˆè€‰ÉÕ¹¹¥¹œˆô4(€€€€ˆˆˆ4(€€€‘…Ñ„€ôÉ•ÅÕ•ÍÐ¹•Ñ}©Í½¸¡Í¥±•¹ÐõQÉÕ”¤4(€€€¥˜¹½Ð‘…Ñ„è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰5¥ÍÍ¥¹œÉ•ÅÕ•ÍÐ‰½‘ä¸‰ô¤°€ÐÀÀ4(4(€€€Í•ÍÍ¥½¹}¥€ô€¡‘…Ñ„¹•Ð ‰Í•ÍÍ¥½¹}¥ˆ¤½È€ˆˆ¤¹ÍÑÉ¥À ¤4(€€€ÕÉ°€€€€€€€€€ô€¡‘…Ñ„¹•Ð ‰ÕÉ°ˆ¤€€€€€€€½È€ˆˆ¤¹ÍÑÉ¥À ¤4(€€€±…‰•°€€€€€€€ô€¡‘…Ñ„¹•Ð ‰±…‰•°ˆ¤€€€€€½È€ˆˆ¤¹ÍÑÉ¥À ¤4(4(€€€¥˜¹½ÐÍ•ÍÍ¥½¹}¥è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰5¥ÍÍ¥¹œ€Í•ÍÍ¥½¹}¥œ¸‰ô¤°€ÐÀÀ4(€€€¥˜¹½ÐÕÉ°è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰5¥ÍÍ¥¹œ€ÕÉ°œ¸‰ô¤°€ÐÀÀ4(€€€¥˜ÕÉ±Á…ÉÍ”¡ÕÉ°¤¹Í¡•µ”¹½Ð¥¸€ ‰¡ÑÑÀˆ°€‰¡ÑÑÁÌˆ¤è4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì‰•ÉÉ½Èˆè€‰UI0µÕÍÐÍÑ…ÉÐÝ¥Ñ ¡ÑÑÀè¼¼½È¡ÑÑÁÌè¼¼‰ô¤°€ÐÀÀ4(4(€€€€ŒƒŠRŠRA¡…Í”èÍ…Ù”Í•ÍÍ¥½¸ÍÑ…Ñ”ƒŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠR4(€€€€Œ½¹™¥Éµ}Í•ÍÍ¥½¸ ¤Ñ•±±ÌÑ¡”‰É½ÝÍ•ÈÑ¡É•…Ñ¼•áÁ½ÉÐÍÑ½É…”ÍÑ…Ñ”Ñ¼„4(€€€€ŒÑ•µÀ™¥±”…¹±½Í”Ñ¡”±½¥¸‰É½ÝÍ•È¸€I•ÑÕÉ¹Ì„™¥±”Á…Ñ ÍÑÉ¥¹œƒŠP4(€€€€Œ9=P„±¥Ù”A±…åÝÉ¥¡Ð½‰©•ÐƒŠPÍ¼¹¼É½ÍÌµÑ¡É•…É••¹±•Ð¥ÍÍÕ•Ì…É”4(€€€€ŒÁ½ÍÍ¥‰±”¸4(€€€ÍÑ…Ñ•}™¥±”€ô‰É½ÝÍ•É}±½¥¸¹½¹™¥Éµ}Í•ÍÍ¥½¸¡Í•ÍÍ¥½¹}¥¤4(€€€¥˜ÍÑ…Ñ•}™¥±”¥Ì9½¹”è4(€€€€€€€Í•ÍÍ¥½¹}ÍÑ…ÑÕÌ€ô‰É½ÝÍ•É}±½¥¸¹•Ñ}Í•ÍÍ¥½¹}ÍÑ…ÑÕÌ¡Í•ÍÍ¥½¹}¥¤4(€€€€€€€‘•Ñ…¥°€ôÍ•ÍÍ¥½¹}ÍÑ…ÑÕÌ¹•Ð ‰•ÉÉ½Èˆ¤½È€‰Õ¹­¹½Ý¸•ÉÉ½Èˆ4(€€€€€€€‰É½ÝÍ•É}±½¥¸¹™¥¹¥Í¡}Í•ÍÍ¥½¸¡Í•ÍÍ¥½¹}¥¤4(€€€€€€€É•ÑÕÉ¸©Í½¹¥™ä¡ì4(€€€€€€€€€€€€‰•ÉÉ½Èˆè€ 4(€€€€€€€€€€€€€€€˜‰½Õ±¹½ÐÍ…Ù”±½¥¸Í•ÍÍ¥½¸ÍÑ…Ñ”€¡í‘•Ñ…¥±ô¤¸€ˆ4(€€€€€€€€€€€€€€€€‰5…­”ÍÕÉ”å½Ô…É”™Õ±±ä±½•¥¸‰•™½É”±¥­¥¹œ½¹Ñ¥¹Õ”°€ˆ4(€€€€€€€€€€€€€€€€‰Ñ¡•¸ÍÑ…ÉÐ„¹•Ü±½¥¸Í•ÍÍ¥½¸¸ˆ4(€€€€€€€€€€€€¤4(€€€€€€€ô¤°€ÐÀÀ4(4(€€€±…‰•°€ô±…‰•°½È}…ÕÑ½}±…‰•°¡ÕÉ°¤4(4(€€€€ŒƒŠRŠRA¡…Í”€ÈèÉ•…Ñ”¡¥ÍÑ½ÉäÉ•½É¥µµ•‘¥…Ñ•±äƒŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠR4(€€€ÉÕ¹}¥€ô‘…Ñ…‰…Í”¹É•…Ñ•}ÉÕ¸¡±…‰•°õ±…‰•°°Í½ÕÉ•}ÕÉ°õÕÉ°¤4(4(€€€€ŒƒŠRŠRA¡…Í”€Ìè±…Õ¹ A±…åÝÉ¥¡ÐÍÉ…Á”¥¸‰…­É½Õ¹ƒŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠRŠR
+# â”€â”€ Logging â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%H:%M:%S",
+)
+
+# â”€â”€ App setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+app = Flask(__name__)
+CORS(app)
+
+# Initialise the database (creates tables if they don't exist)
+database.init_db()
+
+# â”€â”€ OpenAI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+openai_client = OpenAI()
+
+CHAT_SYSTEM_PROMPT = """You are a helpful support assistant for The Syndicate Amazon Mastery UPC Scraper.
+
+This tool lets users paste a supplier category page URL and scrape product data from it.
+It works by detecting /products/ links on the listing page and visiting each product detail page.
+It extracts: product_name, brand, sku, upc, price, pack_size, case_pack, image_url, product_url.
+
+Key behaviours:
+- Strongly prefers /products/ URLs; rejects /collections/ and navigation links.
+- Uses a two-pass approach: context-aware link collection first, URL-only fallback if needed.
+- Saves every scrape to a local SQLite database with a label and timestamp.
+- Results can be exported to .xlsx from the results header or the History sidebar.
+
+Help users with:
+- How to use the tool (paste URL, optional label, click Scrape)
+- Why scraping might return no results (JavaScript-rendered sites, bot protection, unusual layouts)
+- What each extracted field means (UPC, SKU, pack size, case pack)
+- How to export results to Excel
+- How to view, rename, and delete saved scrapes in the History sidebar
+- Common issues (timeouts, empty results, missing UPC or case pack data)
+
+Keep answers short and practical. Do not refer to the app as Scrape Buddy â€” it is The Syndicate Amazon Mastery UPC Scraper."""
+
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def _auto_label(url: str) -> str:
+    """
+    Generate a human-readable label from a URL + timestamp.
+    e.g. "example.com â€” 14:32 19/03/2026"
+    """
+    domain = urlparse(url).netloc.removeprefix("www.")
+    now = datetime.now(timezone.utc).strftime("%H:%M %d/%m/%Y")
+    return f"{domain} â€” {now}"
+
+
+# All product fields, in display order.
+# Used by both the export and to normalise Strategy 1 results (which lack
+# the newer fields) so the spreadsheet always has consistent columns.
+PRODUCT_FIELDS = [
+    "product_name", "brand", "sku", "upc",
+    "price", "pack_size", "case_pack",
+    "image_url", "product_url",
+    # UPC enrichment metadata (empty string when not applicable)
+    "upc_source", "upc_match_confidence", "upc_enriched", "missing_upc",
+    "upc_confidence_color", "upc_match_reason",
+    # Pack enrichment metadata
+    "raw_pack_text", "unit_measure", "pack_confidence",
+    # Detail-page structured fields
+    "unit_size", "unit_price", "pricing_unit",
+    # Multi-supplier extraction fields
+    "bulk_price", "minimum_order_qty", "raw_price_text",
+]
+
+
+def _normalise_product(p: dict) -> dict:
+    """Ensure every product dict has every field, defaulting to ''."""
+    return {field: p.get(field, "") for field in PRODUCT_FIELDS}
+
+
+def _build_xlsx(run: dict) -> io.BytesIO:
+    """
+    Build an .xlsx workbook for a scrape run and return it as a BytesIO buffer.
+    Applies minimal styling: bold gold header row, auto column widths.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Products"
+
+    # Header row
+    headers = [f.replace("_", " ").title() for f in PRODUCT_FIELDS]
+    ws.append(headers)
+
+    # Style the header row: bold, gold fill, dark text
+    gold_fill = PatternFill("solid", fgColor="C9A84C")
+    bold_font = Font(bold=True, color="0B0B0B")
+    for cell in ws[1]:
+        cell.fill = gold_fill
+        cell.font = bold_font
+        cell.alignment = Alignment(horizontal="center")
+
+    # Data rows
+    for product in run.get("products", []):
+        p = _normalise_product(product)
+        ws.append([p[field] for field in PRODUCT_FIELDS])
+
+    # Auto-size columns (rough heuristic: max of header length and first 20 values)
+    for col_idx, field in enumerate(PRODUCT_FIELDS, start=1):
+        col_letter = ws.cell(row=1, column=col_idx).column_letter
+        max_len = len(headers[col_idx - 1])
+        for row in ws.iter_rows(min_row=2, max_row=min(ws.max_row, 21), min_col=col_idx, max_col=col_idx):
+            for cell in row:
+                if cell.value:
+                    max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max_len + 3, 50)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+# â”€â”€ Background workers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = False) -> None:
+    """
+    Run scraping strategies + enrichment in a background thread.
+    Calls database.complete_run() on success or database.fail_run() on error.
+    """
+    try:
+        result = run_best_strategy(html, url, use_playwright=use_playwright)
+        enrich_all_pack(result["products"])
+        result["products"] = upc_enrichment.enrich_products_upc(
+            result["products"], providers=default_providers()
+        )
+
+        # â”€â”€ Data quality metrics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        products = result["products"]
+        total = len(products)
+        if total > 0:
+            has_name = sum(1 for p in products if p.get("product_name"))
+            has_price = sum(1 for p in products if p.get("price"))
+            has_upc = sum(1 for p in products if p.get("upc"))
+
+            name_pct = has_name / total * 100
+            price_pct = has_price / total * 100
+
+            quality_warnings = []
+            if name_pct < 50:
+                quality_warnings.append(f"Only {name_pct:.0f}% of products have names")
+            if price_pct < 50:
+                quality_warnings.append(f"Only {price_pct:.0f}% of products have prices")
+
+            # Detect "same price" bug: if >80% of products share the same price
+            if has_price >= 3:
+                from collections import Counter
+                price_counts = Counter(p.get("price", "") for p in products if p.get("price"))
+                most_common_price, most_common_count = price_counts.most_common(1)[0]
+                if most_common_count / has_price > 0.8 and has_price > 5:
+                    quality_warnings.append(
+                        f"WARNING: {most_common_count}/{has_price} products share the same price "
+                        f"({most_common_price}) â€” likely a scraping bug"
+                    )
+
+            if quality_warnings:
+                logging.warning(
+                    f"[Job {run_id}] Data quality issues detected:\n  " +
+                    "\n  ".join(quality_warnings)
+                )
+
+            logging.info(
+                f"[Job {run_id}] Quality: {has_name}/{total} names ({name_pct:.0f}%), "
+                f"{has_price}/{total} prices ({price_pct:.0f}%), "
+                f"{has_upc}/{total} UPCs ({has_upc/total*100:.0f}%)"
+            )
+
+        database.complete_run(
+            run_id=run_id,
+            strategy_id=result["strategy_id"],
+            strategy_name=result["strategy_name"],
+            products=result["products"],
+        )
+        logging.info(
+            f"[Job {run_id}] Completed â€” {len(result['products'])} product(s)"
+        )
+    except Exception as e:
+        logging.exception(f"[Job {run_id}] Scrape worker failed")
+        database.fail_run(run_id, str(e))
+
+
+def _run_auth_scrape_worker(
+    run_id: int, url: str, state_file: str, session_id: str
+) -> None:
+    """
+    Run an authenticated Playwright catalog scrape in a background thread.
+
+    Important: keep the authenticated supplier pipeline based on supplier-visible
+    data only. Do not run external UPC enrichment here because it can overwrite
+    or mask the real detail-page values during Nassau/login hardening.
+    """
+    try:
+        products = playwright_catalog.run(state_file, url)
+        enrich_all_pack(products)
+        database.complete_run(
+            run_id=run_id,
+            strategy_id=playwright_catalog.ID,
+            strategy_name=playwright_catalog.NAME,
+            products=products,
+        )
+        logging.info(
+            f"[Job {run_id}] Auth scrape completed - {len(products)} product(s)"
+        )
+    except Exception as e:
+        logging.exception(f"[Job {run_id}] Auth scrape worker failed")
+        database.fail_run(run_id, str(e))
+    finally:
+        browser_login.finish_session(session_id)
+
+
+# â”€â”€ Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/api/scrape", methods=["POST"])
+def scrape():
+    """
+    Start a background scrape job and return immediately.
+
+    Request body:
+        { "url": "https://...", "label": "Optional label" }
+
+    Response (immediate â€” job still running):
+        { "run_id": 123, "label": "...", "status": "running" }
+
+    The history entry appears right away; poll GET /api/history for updates.
+    """
+    data = request.get_json(silent=True)
+    if not data or not data.get("url"):
+        return jsonify({"error": "Missing 'url' in request body."}), 400
+
+    url = data["url"].strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return jsonify({"error": "URL must start with http:// or https://"}), 400
+
+    label = (data.get("label") or "").strip() or _auto_label(url)
+
+    # Fetch HTML synchronously â€” fast network call, not the slow part.
+    # If requests fails or HTML looks empty/blocked, try Playwright as fallback.
+    html = None
+    fetch_error = None
+
+    try:
+        html = fetch_html(url)
+    except Exception as e:
+        fetch_error = e
+        logging.warning(f"[Scrape] requests fetch failed: {e} â€” will try Playwright")
+
+    # Determine if we need Playwright (fetch failed, blocked, or JS-rendered)
+    used_playwright = False
+    needs_playwright = html is None
+    if html:
+        lower_html = html.lower()
+        soup_check = BeautifulSoup(html, 'html.parser')
+        body_text_len = len(soup_check.get_text(strip=True)) if soup_check.body else 0
+        is_blocked = any(phrase in lower_html for phrase in [
+            "access denied", "403 forbidden", "captcha", "are you a robot",
+            "please enable javascript", "checking your browser",
+        ])
+        # Check for JS framework that renders products client-side
+        is_js_rendered = any(sig in html for sig in [
+            'data-bind=', 'ko.applyBindings', 'ng-app', 'ng-controller',
+            '__NEXT_DATA__', 'data-reactroot',
+        ])
+        # If products exist in HTML but prices are missing, JS rendering is likely needed
+        has_product_classes = bool(soup_check.find(attrs={"class": lambda c: c and any(
+            kw in ' '.join(c).lower() for kw in ["product", "item", "card"]
+        ) if isinstance(c, list) else False}))
+        has_prices = bool(soup_check.find(string=lambda s: s and '$' in s))
+        products_but_no_prices = has_product_classes and not has_prices
+
+        if body_text_len < 500 or is_blocked or is_js_rendered or products_but_no_prices:
+            needs_playwright = True
+
+    if needs_playwright:
+        try:
+            from scraper import fetch_html_playwright
+            pw_html = fetch_html_playwright(url, wait_ms=4000)
+            if pw_html and (html is None or len(pw_html) > len(html or '') + 200):
+                logging.info(
+                    f"[Scrape] Playwright produced {'initial' if html is None else 'more'} content "
+                    f"({len(pw_html)} chars{f' vs {len(html)} from requests' if html else ''})"
+                )
+                html = pw_html
+                used_playwright = True
+                fetch_error = None
+        except Exception as e:
+            logging.warning(f"[Scrape] Playwright fallback failed: {e}")
+
+    # If we still have no HTML, return error
+    if not html:
+        if fetch_error:
+            if 'Timeout' in type(fetch_error).__name__:
+                return jsonify({"error": "Request timed out."}), 504
+            return jsonify({"error": f"Failed to fetch page: {fetch_error}"}), 502
+        return jsonify({"error": "Could not fetch page content."}), 502
+
+    # Create the history record immediately so it shows up in the sidebar
+    run_id = database.create_run(label=label, source_url=url)
+
+    # Launch the slow work (parsing + enrichment + DB write) in the background
+    threading.Thread(
+        target=_run_scrape_worker,
+        args=(run_id, url, html, used_playwright),
+        daemon=True,
+        name=f"scrape-{run_id}",
+    ).start()
+
+    return jsonify({"run_id": run_id, "label": label, "status": "running"})
+
+
+@app.route("/api/history", methods=["GET"])
+def history_list():
+    """Return all scrape runs, newest first (no product rows)."""
+    return jsonify(database.get_history())
+
+
+@app.route("/api/history/<int:run_id>", methods=["GET"])
+def history_get(run_id):
+    """Return a single scrape run including all its product rows."""
+    run = database.get_run(run_id)
+    if run is None:
+        return jsonify({"error": "Run not found."}), 404
+    return jsonify(run)
+
+
+@app.route("/api/history/<int:run_id>", methods=["PATCH"])
+def history_rename(run_id):
+    """
+    Rename a scrape run.
+    Request body: { "label": "New label" }
+    """
+    data = request.get_json(silent=True)
+    if not data or not data.get("label", "").strip():
+        return jsonify({"error": "Missing 'label'."}), 400
+    updated = database.update_label(run_id, data["label"])
+    if not updated:
+        return jsonify({"error": "Run not found."}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/api/history/<int:run_id>", methods=["DELETE"])
+def history_delete(run_id):
+    """Delete a scrape run and all its products."""
+    deleted = database.delete_run(run_id)
+    if not deleted:
+        return jsonify({"error": "Run not found."}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/api/export/<int:run_id>", methods=["GET"])
+def export_xlsx(run_id):
+    """
+    Download a scrape run as an .xlsx file.
+    The filename is derived from the run label.
+    """
+    run = database.get_run(run_id)
+    if run is None:
+        return jsonify({"error": "Run not found."}), 404
+
+    buf = _build_xlsx(run)
+
+    # Build a safe filename from the label
+    safe_label = "".join(c if c.isalnum() or c in " -_" else "_" for c in run["label"])
+    filename = f"{safe_label[:60]}.xlsx"
+
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.route("/api/auth/start", methods=["POST"])
+def auth_start():
+    """
+    Open a visible browser at the login URL so the user can log in manually.
+
+    Request body: { "login_url": "https://supplier.com/login" }
+    Response:     { "session_id": "abc123", "status": "waiting" }
+    """
+    data = request.get_json(silent=True)
+    if not data or not data.get("login_url"):
+        return jsonify({"error": "Missing 'login_url'."}), 400
+
+    login_url = data["login_url"].strip()
+    if urlparse(login_url).scheme not in ("http", "https"):
+        return jsonify({"error": "login_url must start with http:// or https://"}), 400
+
+    try:
+        session_id = browser_login.start_session(login_url)
+        return jsonify({"session_id": session_id, "status": "waiting"})
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        return jsonify({"error": f"Failed to open browser: {e}"}), 500
+
+
+@app.route("/api/auth/scrape", methods=["POST"])
+def auth_scrape():
+    """
+    Confirm the login session and run a full Playwright-based catalog crawl.
+
+    Confirm the login session, then launch the Playwright catalog crawl in
+    the background and return immediately.
+
+    Flow:
+      1. confirm_session() â€” synchronous: browser thread saves cookies to a
+         temp file and closes the visible login browser (typically 2â€“5 s).
+      2. create_run()      â€” history entry appears in the sidebar right away.
+      3. Background thread â€” runs playwright_catalog.run(), enrichment, and
+         complete_run() / fail_run(). Session cleanup always happens here.
+      4. Returns immediately with { run_id, label, status: "running" }.
+
+    Request body: { "session_id": "...", "url": "https://...", "label": "Optional" }
+    Response:     { "run_id": 123, "label": "...", "status": "running" }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Missing request body."}), 400
+
+    session_id = (data.get("session_id") or "").strip()
+    url         = (data.get("url")        or "").strip()
+    label       = (data.get("label")      or "").strip()
+
+    if not session_id:
+        return jsonify({"error": "Missing 'session_id'."}), 400
+    if not url:
+        return jsonify({"error": "Missing 'url'."}), 400
+    if urlparse(url).scheme not in ("http", "https"):
+        return jsonify({"error": "URL must start with http:// or https://"}), 400
+
+    # â”€â”€ Phase: save session state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # confirm_session() tells the browser thread to export storage state to a
+    # temp file and close the login browser.  Returns a file path string â€”
+    # NOT a live Playwright object â€” so no cross-thread greenlet issues are
+    # possible.
+    state_file = browser_login.confirm_session(session_id)
+    if state_file is None:
+        session_status = browser_login.get_session_status(session_id)
+        detail = session_status.get("error") or "unknown error"
+        browser_login.finish_session(session_id)
+        return jsonify({
+            "error": (
+                f"Could not save login session state ({detail}). "
+                "Make sure you are fully logged in before clicking Continue, "
+                "then start a new login session."
+            )
+        }), 400
+
+    label = label or _auto_label(url)
+
+    # â”€â”€ Phase 2: create history record immediately â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    run_id = database.create_run(label=label, source_url=url)
+
+    # â”€â”€ Phase 3: launch Playwright scrape in background â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # The worker owns session cleanup (finish_session) regardless of outcome.
     threading.Thread(
         target=_run_auth_scrape_worker,
@@ -86,8 +541,8 @@ def chat():
     if not data or not data.get("message", "").strip():
         return jsonify({"error": "Missing 'message'."}), 400
 
-    if not os.environ.get("OPENA I_API_KEY"):
-        return jsonify({"error": "OPENA I_API_KEY is not set."}), 500
+    if not os.environ.get("OPENAI_API_KEY"):
+        return jsonify({"error": "OPENAI_API_KEY is not set."}), 500
 
     try:
         response = openai_client.chat.completions.create(
