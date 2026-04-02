@@ -1,174 +1,321 @@
-egory/widgets"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <button id="scrapeBtn" onclick="runScrape()">Scrape</button>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scrape Buddy — The Syndicate</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f0f0f;--card:#1a1a1a;--border:#2a2a2a;--gold:#d4a843;--gold-dim:#a8842f;--text:#e0e0e0;--muted:#888;--green:#4caf50;--red:#ef5350}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:hidden}
+/* Sidebar */
+.sidebar{width:280px;background:#111;border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-header{padding:20px;border-bottom:1px solid var(--border);text-align:center}
+.sidebar-header h2{color:var(--gold);font-size:1.1rem;font-weight:600}
+.sidebar-header p{color:var(--muted);font-size:.75rem;margin-top:4px}
+.history-list{flex:1;overflow-y:auto;padding:8px}
+.history-item{padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:4px;transition:background .2s}
+.history-item:hover{background:var(--card)}
+.history-item .label{font-size:.85rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.history-item .meta{font-size:.7rem;color:var(--muted);margin-top:2px}
+.no-history{color:var(--muted);text-align:center;padding:40px 20px;font-size:.85rem}
+/* Main */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{padding:16px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px}
+.topbar h1{color:var(--gold);font-size:1.3rem;font-weight:700}
+.topbar .status{margin-left:auto;font-size:.8rem;color:var(--muted)}
+.content{flex:1;overflow-y:auto;padding:24px}
+/* Form Card */
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:20px}
+.card h3{color:var(--gold);font-size:1rem;margin-bottom:16px;font-weight:600}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.form-group{display:flex;flex-direction:column;gap:6px}
+.form-group.full{grid-column:1/-1}
+.form-group label{font-size:.8rem;color:var(--muted);font-weight:500}
+.form-group input,.form-group select{background:#111;border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-size:.9rem;outline:none;transition:border-color .2s}
+.form-group input:focus,.form-group select:focus{border-color:var(--gold)}
+.form-group input::placeholder{color:#555}
+.checkbox-row{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+.checkbox-row label{display:flex;align-items:center;gap:6px;font-size:.85rem;color:var(--text);cursor:pointer}
+.checkbox-row input[type=checkbox]{accent-color:var(--gold);width:16px;height:16px}
+.btn-row{display:flex;gap:12px;margin-top:8px}
+.btn{padding:10px 24px;border-radius:8px;border:none;font-size:.9rem;font-weight:600;cursor:pointer;transition:all .2s}
+.btn-primary{background:var(--gold);color:#000}.btn-primary:hover{background:var(--gold-dim)}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.btn-secondary{background:transparent;border:1px solid var(--border);color:var(--text)}.btn-secondary:hover{border-color:var(--gold)}
+/* Progress */
+.progress-area{display:none;margin-top:16px}
+.progress-bar-outer{background:#222;border-radius:6px;height:8px;overflow:hidden}
+.progress-bar-inner{background:var(--gold);height:100%;width:0%;transition:width .3s}
+.progress-text{font-size:.8rem;color:var(--muted);margin-top:6px}
+/* Results */
+.results-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.results-header h3{color:var(--gold);font-size:1rem;font-weight:600}
+.results-header .count{font-size:.8rem;color:var(--muted)}
+.results-header .export-btn{margin-left:auto}
+table{width:100%;border-collapse:collapse}
+th{background:#111;color:var(--gold);font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;text-align:left;position:sticky;top:0}
+td{padding:10px 12px;border-bottom:1px solid var(--border);font-size:.85rem;color:var(--text)}
+tr:hover td{background:#1f1f1f}
+td img{width:50px;height:50px;object-fit:contain;border-radius:4px;background:#222}
+.empty-state{text-align:center;padding:60px 20px;color:var(--muted)}
+.empty-state p{font-size:.95rem;margin-bottom:8px}
+.empty-state .sub{font-size:.8rem}
+/* Chat Widget */
+.chat-toggle{position:fixed;bottom:20px;right:20px;width:52px;height:52px;border-radius:50%;background:var(--gold);color:#000;border:none;font-size:1.4rem;cursor:pointer;box-shadow:0 4px 20px rgba(212,168,67,.4);z-index:1000;display:flex;align-items:center;justify-content:center}
+.chat-panel{position:fixed;bottom:80px;right:20px;width:360px;height:480px;background:var(--card);border:1px solid var(--border);border-radius:12px;display:none;flex-direction:column;z-index:1000;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+.chat-panel.open{display:flex}
+.chat-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.chat-head span{color:var(--gold);font-weight:600;font-size:.9rem}
+.chat-head button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.2rem}
+.chat-messages{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:8px}
+.chat-msg{max-width:85%;padding:10px 14px;border-radius:12px;font-size:.85rem;line-height:1.4}
+.chat-msg.bot{background:#222;color:var(--text);align-self:flex-start;border-bottom-left-radius:4px}
+.chat-msg.user{background:var(--gold);color:#000;align-self:flex-end;border-bottom-right-radius:4px}
+.chat-input-row{padding:12px;border-top:1px solid var(--border);display:flex;gap:8px}
+.chat-input-row input{flex:1;background:#111;border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:.85rem;outline:none}
+.chat-input-row button{background:var(--gold);border:none;color:#000;border-radius:8px;padding:0 16px;font-weight:600;cursor:pointer}
+@media(max-width:768px){.sidebar{display:none}.form-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<!-- Sidebar -->
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h2>Scrape Buddy</h2>
+    <p>The Syndicate Amazon Mastery</p>
+  </div>
+  <div class="history-list" id="historyList">
+    <div class="no-history" id="noHistory">No scrape history yet.<br>Run your first scrape to get started.</div>
+  </div>
+</div>
+
+<!-- Main Content -->
+<div class="main">
+  <div class="topbar">
+    <h1>Scrape Buddy</h1>
+    <div class="status" id="statusText">Ready</div>
+  </div>
+  <div class="content">
+    <!-- Scrape Form -->
+    <div class="card">
+      <h3>New Scrape</h3>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Login URL (optional)</label>
+          <input type="text" id="loginUrl" placeholder="https://supplier.com/login">
         </div>
-        <div class="label-row">
-          <label for="labelInput">Label (optional):</label>
-          <input
-            type="text"
-            id="labelInput"
-            placeholder="Auto-generated from domain + time if left blank"
-            autocomplete="off"
-          />
+        <div class="form-group">
+          <label>Category / Listing URL</label>
+          <input type="text" id="categoryUrl" placeholder="https://supplier.com/products/category">
+        </div>
+        <div class="form-group">
+          <label>Label (optional)</label>
+          <input type="text" id="labelInput" placeholder="e.g. Grocery Q2 Scrape">
+        </div>
+        <div class="form-group">
+          <label>Mode</label>
+          <select id="modeSelect">
+            <option value="listing">Listing → Detail</option>
+            <option value="single">Single Page Table</option>
+            <option value="catalog">Playwright Catalog</option>
+          </select>
+        </div>
+        <div class="form-group full">
+          <div class="checkbox-row">
+            <label><input type="checkbox" id="chkUpc" checked> UPC Lookup</label>
+            <label><input type="checkbox" id="chkPaginate" checked> Auto-Paginate</label>
+            <label><input type="checkbox" id="chkJs"> JS Rendering</label>
+            <label><input type="checkbox" id="chkLogin"> Login First</label>
+          </div>
+        </div>
+        <div class="form-group full">
+          <div class="btn-row">
+            <button class="btn btn-primary" id="btnScrape" onclick="startScrape()">Start Scrape</button>
+            <button class="btn btn-secondary" onclick="clearForm()">Clear</button>
+          </div>
         </div>
       </div>
-
-      <!-- ── Login-Required Crawl panel ── -->
-      <div class="mode-panel" id="panelLogin">
-        <div class="field-group">
-          <div class="field-label">Login URL</div>
-          <div class="input-row">
-            <input
-              type="url"
-              id="loginUrlInput"
-              placeholder="https://example.com/account/login"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </div>
-        </div>
-        <div class="field-group">
-          <div class="field-label">Category / Listing URL (after login)</div>
-          <div class="input-row">
-            <input
-              type="url"
-              id="authUrlInput"
-              placeholder="https://example.com/collections/all-products"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </div>
-        </div>
-        <div class="field-group">
-          <div class="label-row">
-            <label for="authLabelInput">Label (optional):</label>
-            <input
-              type="text"
-              id="authLabelInput"
-              placeholder="Auto-generated from domain + time if left blank"
-              autocomplete="off"
-            />
-          </div>
-        </div>
-        <div class="login-actions">
-          <button class="btn-secondary" id="startLoginBtn" onclick="startLoginSession()">
-            ⟢ Start Login Session
-          </button>
-          <button
-            class="btn-secondary"
-            id="continueLoginBtn"
-            onclick="continueAfterLogin()"
-            disabled
-            style="background: linear-gradient(135deg, var(--gold) 0%, var(--gold-light) 100%); color: #0b0b0b; border: none; opacity: 0.4;"
-          >
-            ▶ Continue Scrape After Login
-          </button>
-        </div>
-        <div id="loginStatus" class="login-status"></div>
+      <div class="progress-area" id="progressArea">
+        <div class="progress-bar-outer"><div class="progress-bar-inner" id="progressBar"></div></div>
+        <div class="progress-text" id="progressText">Starting...</div>
       </div>
-
     </div>
 
-    <!-- Status line -->
-    <div id="status"></div>
-
-    <!-- Results table -->
-    <div id="resultsWrapper" style="display:none;">
-      <div class="results-meta">
-        <strong>Results</strong>
-        <span id="countBadge" class="count-badge">0</span>
-        <span id="strategyInfo"></span>
-        <!-- Export button — uses the run_id returned by the scrape endpoint -->
-        <button class="btn-export" onclick="exportRun(currentRunId)">⬇ Export .xlsx</button>
+    <!-- Results -->
+    <div class="card" id="resultsCard" style="display:none">
+      <div class="results-header">
+        <h3>Results</h3>
+        <span class="count" id="resultCount"></span>
+        <button class="btn btn-secondary export-btn" onclick="exportXlsx()">Export .xlsx</button>
       </div>
-
-      <div id="qualityBar" class="quality-bar">
-        <div class="quality-title">Run Quality</div>
-        <div id="qualityGrid" class="quality-grid"></div>
-      </div>
-
-      <div id="diagnosticsPanel" class="diagnostics-panel">
-        <div class="diagnostics-title">Scrape Diagnostics</div>
-        <div id="diagnosticsList" class="diagnostics-list"></div>
-      </div>
-
-      <div class="results-toolbar" id="resultsToolbar" style="display:none;">
-        <button class="filter-chip active" data-filter="all" onclick="setResultFilter('all', this)">All Rows</button>
-        <button class="filter-chip" data-filter="missing_name" onclick="setResultFilter('missing_name', this)">Missing Name</button>
-        <button class="filter-chip" data-filter="missing_price" onclick="setResultFilter('missing_price', this)">Missing Price</button>
-        <button class="filter-chip" data-filter="missing_sku" onclick="setResultFilter('missing_sku', this)">Missing SKU</button>
-        <button class="filter-chip" data-filter="missing_upc" onclick="setResultFilter('missing_upc', this)">Missing UPC</button>
-        <button class="filter-chip" data-filter="missing_url" onclick="setResultFilter('missing_url', this)">Missing URL</button>
-      </div>
-
-      <div class="table-wrapper">
+      <div style="overflow-x:auto">
         <table>
           <thead>
-            <tr>
-              <th>Image</th>
-              <th>Product Name</th>
-              <th>Brand</th>
-              <th>Price</th>
-              <th>SKU</th>
-              <th>UPC</th>
-              <th>Pack Size</th>
-              <th>Case Pack</th>
-              <th>URL</th>
-            </tr>
+            <tr><th>Image</th><th>Product</th><th>Brand</th><th>SKU</th><th>UPC</th><th>Price</th><th>Pack</th></tr>
           </thead>
           <tbody id="resultsBody"></tbody>
         </table>
       </div>
     </div>
 
-  </div><!-- /main-content -->
-</div><!-- /app-shell -->
-
-<!-- ══ Chat widget ════════════════════════════════════════════════════════════ -->
-<button id="chatToggle" onclick="toggleChat()" title="Open support assistant">
-  <svg viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <line x1="17" y1="2" x2="17" y2="7" stroke="#c9a84c" stroke-width="1.5" stroke-linecap="round"/>
-    <circle cx="17" cy="1.5" r="1.5" fill="#e2c06a"/>
-    <rect x="6" y="7" width="22" height="18" rx="3.5" fill="#1a1500" stroke="#c9a84c" stroke-width="1.4"/>
-    <rect x="10" y="12" width="4" height="4" rx="1" fill="#c9a84c"/>
-    <rect x="20" y="12" width="4" height="4" rx="1" fill="#c9a84c"/>
-    <rect x="11.5" y="13" width="1.2" height="1.2" rx="0.3" fill="#ffe98a" opacity="0.8"/>
-    <rect x="21.5" y="13" width="1.2" height="1.2" rx="0.3" fill="#ffe98a" opacity="0.8"/>
-    <rect x="11" y="20" width="12" height="2.5" rx="1.25" fill="#c9a84c" opacity="0.7"/>
-    <rect x="4" y="13" width="2.5" height="5" rx="1" fill="#8a6e2f"/>
-    <rect x="27.5" y="13" width="2.5" height="5" rx="1" fill="#8a6e2f"/>
-  </svg>
-</button>
-
-<div id="chatPanel">
-  <div id="chatHeader">
-    <div class="bot-dot"></div>
-    <div><div class="bot-name">Syndicate Assistant</div></div>
-    <div class="bot-status">Online</div>
+    <!-- Empty State -->
+    <div class="empty-state" id="emptyState">
+      <p>Ready to scrape</p>
+      <p class="sub">Enter a supplier URL above and hit Start Scrape</p>
+    </div>
   </div>
-  <div id="chatMessages">
-    <div class="chat-msg assistant">Hello. I'm your Syndicate scraping assistant. Ask me anything about using this tool.</div>
+</div>
+
+<!-- Chat Widget -->
+<button class="chat-toggle" onclick="toggleChat()" title="AI Support Chat">💬</button>
+<div class="chat-panel" id="chatPanel">
+  <div class="chat-head">
+    <span>AI Support Chat</span>
+    <button onclick="toggleChat()">✕</button>
   </div>
-  <div id="chatInputRow">
-    <input type="text" id="chatInput" placeholder="Ask a question…" autocomplete="off" />
-    <button id="chatSendBtn" onclick="sendChat()">Send</button>
+  <div class="chat-messages" id="chatMessages">
+    <div class="chat-msg bot">Hi! I'm your Scrape Buddy assistant. How can I help?</div>
+  </div>
+  <div class="chat-input-row">
+    <input type="text" id="chatInput" placeholder="Ask me anything..." onkeydown="if(event.key==='Enter')sendChat()">
+    <button onclick="sendChat()">Send</button>
   </div>
 </div>
 
 <script>
-  // ── State ──────────────────────────────────────────────────────────────────
-  let currentRunId    = null;   // run_id of the most recently scraped/loaded run
-  let activeHistoryId = null;   // id of the currently highlighted history item
-  let loginSessionId  = null;   // session_id from /api/auth/start
-  let watchingRunIds  = new Set(); // run IDs we're polling until complete/failed
-  let pollInterval    = null;   // setInterval handle for background job polling
-  let currentProducts = [];     // currently rendered rows
-  let currentFilter   = "all";  // active QA filter
-  let currentRunMeta  = null;   // currently loaded run metadata
+let currentRunId=null;
 
-  // ── Init ───────────────────────────────────────────────────────────────────
+// ── History ─────────────────────────────────────────────────────────
+async function loadHistory(){
+  try{
+    const r=await fetch('/api/history');
+    const runs=await r.json();
+    const el=document.getElementById('historyList');
+    if(!runs.length){el.innerHTML='<div class="no-history">No scrape history yet.</div>';return}
+    el.innerHTML=runs.map(h=>`<div class="history-item" onclick="loadRun(${h.id})"><div class="label">${esc(h.label||'Untitled')}</div><div class="meta">${h.product_count||0} products · ${new Date(h.created_at).toLocaleDateString()}</div></div>`).join('');
+  }catch(e){console.error('History load error',e)}
+}
 
-  function setMode(mode) {
-    //Existing mode logic goes here
+async function loadRun(id){
+  try{
+    const r=await fetch('/api/history/'+id);
+    const data=await r.json();
+    currentRunId=id;
+    showResults(data.products||[]);
+  }catch(e){console.error('Run load error',e)}
+}
+
+// ── Scrape ──────────────────────────────────────────────────────────
+async function startScrape(){
+  const url=document.getElementById('categoryUrl').value.trim();
+  if(!url){alert('Please enter a category URL');return}
+  const btn=document.getElementById('btnScrape');
+  btn.disabled=true;btn.textContent='Scraping...';
+  document.getElementById('statusText').textContent='Scraping...';
+  const pa=document.getElementById('progressArea');
+  pa.style.display='block';
+  document.getElementById('progressBar').style.width='10%';
+  document.getElementById('progressText').textContent='Sending request...';
+  document.getElementById('emptyState').style.display='none';
+
+  const body={
+    url:url,
+    login_url:document.getElementById('loginUrl').value.trim()||undefined,
+    label:document.getElementById('labelInput').value.trim()||undefined,
+    mode:document.getElementById('modeSelect').value,
+    upc_lookup:document.getElementById('chkUpc').checked,
+    paginate:document.getElementById('chkPaginate').checked,
+    js_render:document.getElementById('chkJs').checked,
+    login_first:document.getElementById('chkLogin').checked
+  };
+
+  try{
+    document.getElementById('progressBar').style.width='30%';
+    document.getElementById('progressText').textContent='Fetching products...';
+    const r=await fetch('/api/scrape',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const data=await r.json();
+    document.getElementById('progressBar').style.width='100%';
+    if(data.error){
+      document.getElementById('progressText').textContent='Error: '+data.error;
+      document.getElementById('statusText').textContent='Error';
+    }else{
+      currentRunId=data.run_id||null;
+      const products=data.products||[];
+      document.getElementById('progressText').textContent=`Done — ${products.length} products found`;
+      document.getElementById('statusText').textContent='Done';
+      showResults(products);
+      loadHistory();
+    }
+  }catch(e){
+    document.getElementById('progressText').textContent='Network error: '+e.message;
+    document.getElementById('statusText').textContent='Error';
+  }finally{
+    btn.disabled=false;btn.textContent='Start Scrape';
+  }
+}
+
+function showResults(products){
+  const card=document.getElementById('resultsCard');
+  const body=document.getElementById('resultsBody');
+  document.getElementById('emptyState').style.display='none';
+  if(!products.length){card.style.display='none';return}
+  card.style.display='block';
+  document.getElementById('resultCount').textContent=products.length+' products';
+  body.innerHTML=products.map(p=>`<tr>
+    <td>${p.image_url?`<img src="${esc(p.image_url)}" alt="">`:'—'}</td>
+    <td>${esc(p.product_name||'—')}</td>
+    <td>${esc(p.brand||'—')}</td>
+    <td>${esc(p.sku||'—')}</td>
+    <td>${esc(p.upc||'—')}</td>
+    <td>${p.price||'—'}</td>
+    <td>${esc(p.pack_size||p.case_pack||'—')}</td>
+  </tr>`).join('');
+}
+
+function clearForm(){
+  document.getElementById('loginUrl').value='';
+  document.getElementById('categoryUrl').value='';
+  document.getElementById('labelInput').value='';
+  document.getElementById('progressArea').style.display='none';
+  document.getElementById('statusText').textContent='Ready';
+}
+
+async function exportXlsx(){
+  if(!currentRunId){alert('No run selected');return}
+  window.location.href='/api/export/'+currentRunId;
+}
+
+// ── Chat ────────────────────────────────────────────────────────────
+function toggleChat(){
+  document.getElementById('chatPanel').classList.toggle('open');
+}
+
+async function sendChat(){
+  const inp=document.getElementById('chatInput');
+  const msg=inp.value.trim();if(!msg)return;
+  inp.value='';
+  appendChat('user',msg);
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})});
+    const d=await r.json();
+    appendChat('bot',d.reply||d.error||'No response');
+  }catch(e){appendChat('bot','Error: '+e.message)}
+}
+
+function appendChat(role,text){
+  const el=document.getElementById('chatMessages');
+  const d=document.createElement('div');
+  d.className='chat-msg '+role;
+  d.textContent=text;
+  el.appendChild(d);
+  el.scrollTop=el.scrollHeight;
+}
+
+function esc(s){if(!s)return'';return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+
+// ── Init ────────────────────────────────────────────────────────────
+loadHistory();
+</script>
+</body>
+</html>
