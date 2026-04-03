@@ -36,48 +36,15 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from bs4 import BeautifulSoup
 
-# ── Local imports (wrapped for boot resilience) ──────────────────────────────
-_import_errors = []
-try:
-    import database
-except Exception as e:
-    database = None; _import_errors.append(f"database: {e}")
-try:
-    import browser_login
-except Exception as e:
-    browser_login = None; _import_errors.append(f"browser_login: {e}")
-try:
-    import upc_enrichment
-except Exception as e:
-    upc_enrichment = None; _import_errors.append(f"upc_enrichment: {e}")
-try:
-    from scraper import fetch_html, debug_scrape, make_auth_fetch_fn
-except Exception as e:
-    fetch_html = debug_scrape = make_auth_fetch_fn = None; _import_errors.append(f"scraper: {e}")
-try:
-    from strategies import run_best_strategy
-except Exception as e:
-    run_best_strategy = None; _import_errors.append(f"strategies: {e}")
-try:
-    from strategies.detail import run as detail_run
-except Exception as e:
-    detail_run = None; _import_errors.append(f"strategies.detail: {e}")
-try:
-    from strategies import playwright_catalog
-except Exception as e:
-    playwright_catalog = None; _import_errors.append(f"playwright_catalog: {e}")
-try:
-    from upc_providers import default_providers
-except Exception as e:
-    default_providers = None; _import_errors.append(f"upc_providers: {e}")
-try:
-    from pack_parser import enrich_all as enrich_all_pack
-except Exception as e:
-    enrich_all_pack = None; _import_errors.append(f"pack_parser: {e}")
-if _import_errors:
-    import sys
-    for err in _import_errors:
-        print(f"[BOOT WARNING] Import failed: {err}", file=sys.stderr)
+import database
+import browser_login
+import upc_enrichment
+from scraper import fetch_html, debug_scrape, make_auth_fetch_fn
+from strategies import run_best_strategy
+from strategies.detail import run as detail_run
+from strategies import playwright_catalog
+from upc_providers import default_providers
+from pack_parser import enrich_all as enrich_all_pack
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -91,17 +58,10 @@ app = Flask(__name__)
 CORS(app)
 
 # Initialise the database (creates tables if they don't exist)
-if database:
-    database.init_db()
-else:
-    logging.warning('database module not available - skipping init_db')
+database.init_db()
 
 # ── OpenAI ────────────────────────────────────────────────────────────────────
-try:
-    openai_client = OpenAI()
-except Exception as e:
-    openai_client = None
-    logging.warning(f'OpenAI client init failed: {e}')
+openai_client = OpenAI()
 
 CHAT_SYSTEM_PROMPT = """You are a helpful support assistant for The Syndicate Amazon Mastery UPC Scraper.
 
@@ -302,18 +262,9 @@ def _run_auth_scrape_worker(
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@app.route("/health")
-def health():
-    missing = [e.split(":")[0] for e in _import_errors] if _import_errors else []
-    return jsonify({"status": "ok", "missing_modules": missing}), 200
-
-
 @app.route("/")
 def index():
-    try:
-        return render_template("index.html")
-    except Exception:
-        return "<h1>Scrape Buddy</h1><p>Service running. UI loading...</p>", 200
+    return render_template("index.html")
 
 
 @app.route("/api/scrape", methods=["POST"])
