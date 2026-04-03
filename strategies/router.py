@@ -137,17 +137,17 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
             f"trying Strategy 2 anyway"
         )
 
-    # ── Pre-check: does the page have /products/ links? ───────────────────────
+    # ── Pre-check: does the page have product detail links? ────────────────────
     # This is a cheap scan (no extra HTTP requests) that lets us skip Strategy 1
     # when we already know the page links to product detail pages.
+    # Uses broad product path signals (/products/, /product/, /item/, /p/, etc.)
     #
     # Exception: row_catalog pages are always routed through Strategy 1 first,
     # because Strategy 1 uses the explicit column structure (row_extractor) to
     # extract images, SKUs, prices, and the correct product-detail links directly
-    # from the structured layout — generic link scoring in Strategy 2 cannot do
-    # this reliably on table/row-based wholesale catalogs.
+    # from the structured layout.
     product_link_count = count_product_links(html, url)
-    logger.info(f"[Router] Found {product_link_count} /products/ link(s) on the listing page")
+    logger.info(f"[Router] Found {product_link_count} product detail link(s) on the listing page")
 
     should_fast_track_to_detail = (
         product_link_count >= PRODUCTS_LINK_THRESHOLD
@@ -159,11 +159,8 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
     )
 
     if should_fast_track_to_detail:
-        # Fast-track to Strategy 2 only when the page is confidently classified.
-        # Low-confidence pages keep the layered Strategy 1 -> Strategy 2 flow so
-        # explicit public row/card extraction is not skipped too early.
         logger.info(
-            f"[Router] {product_link_count} /products/ link(s) detected on a "
+            f"[Router] {product_link_count} product link(s) detected on a "
             f"confident {page_type.type} page — skipping Strategy 1 and going "
             f"straight to Strategy 2 (Detail Page Crawl)"
         )
@@ -172,22 +169,21 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
 
         if products:
             reason = (
-                f"Detected {product_link_count} /products/ link(s) on the listing page; "
+                f"Detected {product_link_count} product link(s) on the listing page; "
                 f"Strategy 2 scraped {len(products)} product detail pages"
             )
             logger.info(f"[Router] Strategy 2 succeeded — {len(products)} products")
             return _result(s2, products, reason)
 
-        # Strategy 2 found links but came back empty (e.g. all detail pages failed)
         reason = (
-            f"Detected {product_link_count} /products/ link(s) but Strategy 2 "
+            f"Detected {product_link_count} product link(s) but Strategy 2 "
             f"could not extract data (bot protection or JS rendering likely). "
             f"Falling back to Strategy 1."
         )
         logger.warning(f"[Router] Strategy 2 found links but returned no products — falling back")
     elif product_link_count >= PRODUCTS_LINK_THRESHOLD and page_type != "row_catalog":
         logger.info(
-            f"[Router] {product_link_count} /products/ link(s) detected, but page "
+            f"[Router] {product_link_count} product link(s) detected, but page "
             f"classification confidence is only {page_type.confidence:.0%} "
             f"({page_type.type}) — preserving layered Strategy 1 first"
         )
