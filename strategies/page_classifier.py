@@ -32,39 +32,14 @@ class ClassificationResult:
     Attributes:
         type:       One of listing_grid | row_catalog | detail_page |
                     js_app | login_required
-        confidence: Float 0â€“1.  Rough estimate; not a calibrated probability.
+        confidence: Float â€“1.  Rough estimate; not a calibrated probability.
         reason:     One-line human-readable explanation of the decision.
     """
     type:       str
     confidence: float
     reason:     str
 
-    # â”€â”€ String-comparison transparency â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    def __eq__(self, other):
-        if isinstance(other, str):
-            return self.type == other
-        if isinstance(other, ClassificationResult):
-            return self.type == other.type
-        return NotImplemented
-
-    def __ne__(self, other):
-        result = self.__eq__(other)
-        return result if result is NotImplemented else not result
-
-    def __hash__(self):
-        return hash(self.type)
-
-    def __str__(self):
-        return self.type
-
-    def __repr__(self):
-        return (
-            f"ClassificationResult(type={self.type!r}, "
-            f"confidence={self.confidence:.2f}, reason={self.reason!r})"
-        )
-
-# Minimum text content length below which we suspect a JS-rendered shell page
-_JS_APP_MIN_CONTENT = 500
+    #â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€(€€€‘•˜}}•Å}|¡Í•±˜°½Ñ¡•È¤è(€€€€€€€¥˜¥Í¥¹ÍÑ…¹”¡½Ñ¡•È°ÍÑÈ¤è(€€€€€€€€€€€É•ÑÕÉ¸Í•±˜¹ÑåÁ”€ôô½Ñ¡•È(€€€€€€€¥˜¥Í¥¹ÍÑ…¹”¡½Ñ¡•È°±…ÍÍ¥™¥…Ñ¥½¹I•ÍÕ±Ð¤è(€€€€€€€€€€€É•ÑÕÉ¸Í•±˜¹ÑåÁ”€ôô½Ñ¡•È¹ÑåÁ”(€€€€€€€É•ÑÕÉ¸9½Ñ%µÁ±•µ•¹Ñ•((€€€‘•˜}}¹•}|¡Í•±˜°½Ñ¡•È¤è(€€€€€€€É•ÍÕ±Ð€ôÍ•±˜¹}}•Å}|¡½Ñ¡•È¤(€€€€€€€É•ÑÕÉ¸É•ÍÕ±Ð¥˜É•ÍÕ±Ð¥Ì9½Ñ%µÁ±•µ•¹Ñ••±Í”¹½ÐÉ•ÍÕ±Ð((€€€‘•˜}}¡…Í¡}|¡Í•±˜¤è(€€€€€€€É•ÑÕÉ¸¡…Í ¡Í•±˜¹ÑåÁ”¤((€€€‘•˜}}ÍÑÉ}|¡Í•±˜¤è(€€€€€€€É•ÑÕÉ¸Í•±˜¹ÑåÁ”((€€€‘•˜}}É•ÁÉ}|¡Í•±˜¤è(€€€€€€€É•ÑÕÉ¸€ (€€€€€€€€€€€˜‰±…ÍÍ¥™¥…Ñ¥½¹I•ÍÕ±Ð¡ÑåÁ”õíÍ•±˜¹ÑåÁ”…Éô°€ˆ(€€€€€€€€€€€˜‰½¹™¥‘•¹”õíÍ•±˜¹½¹™¥‘•¹”è¸É™ô°É•…Í½¸õíÍ•±˜¹É•…Í½¸…Éô¤ˆ(€€€€€€€€¤((Œ5¥¹¥µÕ´Ñ•áÐ½¹Ñ•¹Ð±•¹Ñ ‰•±½ÜÝ¡¥ Ý”ÍÕÍÁ•Ð„)LµÉ•¹‘•É•Í¡•±°Á…”)})M}AA_II:_CONTENT = 500
 
 # Minimum number of product-card-like elements to count as a listing_grid
 _LISTING_GRID_MIN_CARDS = 3
@@ -90,263 +65,18 @@ _LOGIN_SIGNALS = [
 ]
 
 # JS framework signals in page source
-_JS_FRAMEWORK_PATTERNS = [
+_JS_FRAMEWORK_PATTERNQ€C = [
     r"__NEXT_DATA__",
     r"window\.__nuxt__",
     r"window\.React",
-    r'id=["\']app["\']',
-    r'id=["\']root["\']',
+    r"id=["\']app["\']",
+    r"id=["\'\root["\']",
     r"ng-app",
     r"ng-controller",
     r"data-reactroot",
     r"vue-app",
     r"data-bind=",            # KnockoutJS
     r"ko\.applyBindings",     # KnockoutJS
-    r"ember-application",     # Ember.js
-    r"data-ember",            # Ember.js
+    r"ember-application",      # Ember.js
+    r"data-ember",             # Ember.js
 ]
-
-# JSON-LD / itemprop signals for detail page
-_DETAIL_PAGE_SIGNALS = [
-    '"@type": "Product"',
-    '"@type":"Product"',
-    'itemtype="http://schema.org/Product"',
-    'itemtype="https://schema.org/Product"',
-]
-
-
-def _count_card_elements(soup: BeautifulSoup) -> int:
-    """Count repeated product-card-like elements while avoiding broad wrapper hits."""
-    from collections import Counter
-
-    signature_counts = Counter()
-
-    for el in soup.find_all(True):
-        try:
-            classes = el.get("class") or []
-            classes_str = " ".join(classes).lower()
-            el_id = (el.get("id") or "").lower()
-            combined = f"{classes_str} {el_id}".strip()
-            if not combined:
-                continue
-            if not any(sig in combined for sig in _CARD_CLASS_SIGNALS):
-                continue
-
-            # Ignore likely mega-wrappers that contain many nested cards.
-            child_tags = [c for c in el.children if getattr(c, "name", None) is not None]
-            if len(child_tags) >= 12:
-                continue
-
-            signature = (el.name, tuple(sorted(c.lower() for c in classes)))
-            signature_counts[signature] += 1
-        except Exception:
-            continue
-
-    if not signature_counts:
-        return 0
-
-    return max(signature_counts.values())
-
-
-def _count_catalog_rows(soup: BeautifulSoup) -> int:
-    """Count repeated table/list rows that plausibly represent catalog products."""
-    from collections import Counter
-
-    # Look for repeated li/tr children inside catalog-like containers first.
-    signature_counts = Counter()
-    for t in soup.find_all(["table", "ul", "ol", "div"]):
-        try:
-            classes = " ".join(t.get("class") or []).lower()
-            if not any(sig in classes for sig in _ROW_CATALOG_SIGNALS):
-                continue
-            for child in t.find_all(["tr", "li"], recursive=False):
-                child_classes = tuple(sorted(c.lower() for c in (child.get("class") or [])))
-                signature = (child.name, child_classes)
-                signature_counts[signature] += 1
-        except Exception:
-            continue
-
-    if signature_counts:
-        best = max(signature_counts.values())
-        if best >= _ROW_CATALOG_MIN_ROWS:
-            return best
-
-    # Fallback: count <tr> rows containing product-like data.
-    rows = soup.find_all("tr")
-    product_rows = 0
-    for row in rows:
-        cells = row.find_all(["td", "th"], recursive=False)
-        if len(cells) >= 2:
-            text = row.get_text(separator=" ", strip=True).lower()
-            if any(kw in text for kw in ["$", "price", "sku", "item", "upc", "pack"]):
-                product_rows += 1
-    return product_rows
-
-
-def _has_login_form(soup: BeautifulSoup) -> bool:
-    """Return True if the page appears to require login."""
-    # Check for password input field (strongest signal)
-    if soup.find("input", {"type": "password"}):
-        return True
-
-    # Check form action or surrounding text
-    for form in soup.find_all("form"):
-        action = (form.get("action") or "").lower()
-        if any(sig in action for sig in ["login", "sign-in", "signin", "auth"]):
-            return True
-
-    # Check page-level class/id signals
-    for el in soup.find_all(True):
-        combined = " ".join(el.get("class") or []).lower() + " " + (el.get("id") or "").lower()
-        if any(sig in combined for sig in ["login-form", "signin-form", "auth-form", "login-page"]):
-            return True
-
-    return False
-
-
-def _is_detail_page(html: str, soup: BeautifulSoup) -> bool:
-    """Return True if the page looks like a single product detail page."""
-    # Check for JSON-LD Product schema
-    if any(signal in html for signal in _DETAIL_PAGE_SIGNALS):
-        return True
-
-    # Single H1 + price element can indicate a detail page, but many listing
-    # pages also contain one page title H1 plus repeated price elements. To
-    # avoid false positives, require the page to NOT already look like a
-    # substantial listing/grid/row catalog.
-    card_count = _count_card_elements(soup)
-    row_count = _count_catalog_rows(soup)
-
-    h1_tags = soup.find_all("h1")
-    if len(h1_tags) == 1 and card_count < _LISTING_GRID_MIN_CARDS and row_count < _ROW_CATALOG_MIN_ROWS:
-        price_el = soup.find(
-            lambda el: el.name not in ["script", "style"]
-            and any(kw in " ".join(el.get("class") or []).lower()
-                    for kw in ["price", "cost"])
-        )
-        if price_el is not None:
-            return True
-
-    return False
-
-
-def _is_js_app(html: str, soup: BeautifulSoup) -> bool:
-    """Return True if the page is a JS-rendered SPA shell with little real content."""
-    body = soup.find("body")
-    if body is None:
-        return True
-
-    has_js_framework = any(re.search(pat, html) for pat in _JS_FRAMEWORK_PATTERNS)
-
-    body_text = body.get_text(strip=True)
-    if len(body_text) < _JS_APP_MIN_CONTENT:
-        # Short body â€” check for JS framework fingerprints
-        if has_js_framework:
-            return True
-
-    # JS binding frameworks (Knockout, Angular, etc.) often have product card
-    # HTML structure in the page but data is injected by JS.  Detect this by
-    # checking if product-class elements exist but NO price text ($X.XX) appears.
-    if has_js_framework:
-        has_product_els = bool(soup.find(
-            lambda el: el.name and el.get("class") and any(
-                kw in " ".join(el.get("class")).lower()
-                for kw in ["product", "item", "card"]
-            )
-        ))
-        has_price_text = bool(re.search(r"\$\d+\.\d{2}", body_text))
-        if has_product_els and not has_price_text:
-            return True
-
-    return False
-
-
-def classify(html: str, url: str) -> ClassificationResult:
-    """
-    Classify the page type from its HTML.
-
-    Returns a ClassificationResult with .type, .confidence, and .reason.
-    ClassificationResult compares equal to its .type string, so all existing
-    `if page_type == "..."` code continues to work unchanged.
-
-    Never raises â€” returns listing_grid as the safe default.
-    """
-    def _result(page_type: str, confidence: float, reason: str) -> ClassificationResult:
-        r = ClassificationResult(type=page_type, confidence=confidence, reason=reason)
-        logger.info(
-            f"[PageClassifier] {url} -> {page_type} "
-            f"(confidence={confidence:.0%}, reason: {reason})"
-        )
-        return r
-
-    try:
-        soup = BeautifulSoup(html, "html.parser")
-
-        # Pre-compute card and row counts â€” needed to disambiguate login widgets
-        # from true login gates (many e-commerce pages embed a small login form
-        # in the header while the main content is a public product listing).
-        card_count = _count_card_elements(soup)
-        row_count  = _count_catalog_rows(soup)
-
-        # 1. Login gate â€” check first since it overrides everything.
-        #    BUT: if the page also has substantial product content (cards or rows),
-        #    the login form is likely just a header widget, not a gate.
-        has_login = _has_login_form(soup)
-        if has_login and card_count < _LISTING_GRID_MIN_CARDS and row_count < _ROW_CATALOG_MIN_ROWS:
-            return _result("login_required", 0.99, "password input or login form detected")
-        elif has_login:
-            logger.info(
-                f"[PageClassifier] Login form detected but page has "
-                f"{card_count} cards / {row_count} rows â€” treating as public listing"
-            )
-
-        # 2. JS SPA shell â€” body text too short + JS framework fingerprint.
-        if _is_js_app(html, soup):
-            return _result("js_app", 0.90, "body text short + JS framework fingerprint")
-
-        # 3. Single product detail page.
-        #    JSON-LD Product schema is very reliable; H1+price heuristic less so.
-        if any(signal in html for signal in _DETAIL_PAGE_SIGNALS):
-            return _result("detail_page", 0.95, "JSON-LD @type:Product schema found")
-
-        h1_tags = soup.find_all("h1")
-        if len(h1_tags) == 1 and card_count < _LISTING_GRID_MIN_CARDS and row_count < _ROW_CATALOG_MIN_ROWS:
-            price_el = soup.find(
-                lambda el: el.name not in ["script", "style"]
-                and any(kw in " ".join(el.get("class") or []).lower()
-                        for kw in ["price", "cost"])
-            )
-            if price_el is not None:
-                return _result(
-                    "detail_page", 0.65,
-                    "single H1 + price-class element without listing/catalog signals"
-                )
-
-        # 4. B2B row / table catalog.
-        if row_count >= _ROW_CATALOG_MIN_ROWS and row_count > card_count:
-            confidence = min(0.95, 0.60 + row_count * 0.005)
-            return _result(
-                "row_catalog", round(confidence, 2),
-                f"{row_count} product-like table rows (vs {card_count} card elements)"
-            )
-
-        # 5. Standard grid/card listing page.
-        if card_count >= _LISTING_GRID_MIN_CARDS:
-            confidence = min(0.90, 0.55 + card_count * 0.01)
-            return _result(
-                "listing_grid", round(confidence, 2),
-                f"{card_count} product-card elements detected"
-            )
-
-        # Default: listing_grid with low confidence â€” safest fallback.
-        return _result(
-            "listing_grid", 0.35,
-            f"default fallback (rows={row_count}, cards={card_count})"
-        )
-
-    except Exception as e:
-        logger.warning(f"[PageClassifier] Error classifying {url}: {e} â€” defaulting to listing_grid")
-        return ClassificationResult(
-            type="listing_grid", confidence=0.20,
-            reason=f"classification error: {e}"
-        )
