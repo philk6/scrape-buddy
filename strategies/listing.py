@@ -1,33 +1,19 @@
 """
 strategies/listing.py — Strategy 1: Listing Page Heuristics
 
-How it works:
-  Scans the category/listing page HTML for repeating elements whose CSS class
-  names contain common e-commerce keywords (product, item, card, tile, etc.).
-  Extracts name, brand, price, URL, image, and SKU from each matched card.
-
-  When the page exposes a row/table-style catalog with labeled columns (IMAGE,
-  DESCRIPTION, ORDER, PRICE, QTY, etc.) the structured row extractor is used
-  first for highest-fidelity extraction.
+Extraction hierarchy (most reliable → least reliable):
+  1. JSON-LD / Schema.org Product structured data — present on ~70% of
+     e-commerce sites.  Highest fidelity: schema-validated, consistent fields.
+  2. Structured row/table detection (row_extractor) — for B2B wholesale sites
+     with labeled column layouts (IMAGE, DESCRIPTION, ITEM, PRICE).
+  3. Generic CSS class heuristics — fallback for sites with no structured data
+     and non-standard layouts.
 
 Pagination:
   After extracting page 1, the strategy automatically follows pagination links
   (rel=next, aria-label, "Next" text) through all remaining pages and merges
   the results.  Deduplication by product_url, sku, and name+brand+price ensures
   the same row is never counted twice across pages.
-
-When to use:
-  As the first attempt on any page. Works well on traditional server-rendered
-  e-commerce sites where product cards are clearly marked in the HTML.
-
-When it falls short:
-  - Sites that render products via JavaScript (React, Vue, Next.js SPAs)
-  - Heavily customised layouts with unusual class naming
-  - Sites that use obfuscated/minified class names
-
-Future extensions:
-  - JSON-LD / microdata structured data extraction
-  - Schema.org Product markup parsing
 """
 
 import logging
@@ -84,22 +70,98 @@ def _extract_from_jsonld(item: dict, base_url: str) -> dict:
     return None
 
 
+def _extract_jsonld_products(html: str, url: str) -> list:
+    """
+    Extract products from JSON-LD / Schema.org structured data.
+
+    Handles:
+      - Direct @type: Product objects
+      - ItemList / CollectionPage / SearchResultsPage wrappers
+      - @graph arrays (common in WordPress/WooCommerce)
+      - Nested itemListElement with "item" wrappers
+      - Multiple <script type="application/ld+json"> blocks
+    """
+    from bs4 import BeautifulSoup
+    import json
+
+    soup = BeautifulSoup(html, "html.parser")
+    products = []
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or "")
+            items = []
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict):
+                dtype = data.get("@type", "")
+                # Handle single type string or list of types
+                if isinstance(dtype, list):
+                    dtype_set = set(dtype)
+                else:
+                    dtype_set = {dtype}
+
+                if "Product" in dtype_set:
+                    items = [data]
+                elif dtype_set & {"ItemList", "CollectionPage", "SearchResultsPage",
+                                  "OfferCatalog", "ProductCollection"}:
+                    items = data.get("itemListElement", [])
+                elif "@graph" in data:
+                    items = [i for i in data["@graph"]
+                             if isinstance(i, dict) and _is_product_type(i)]
+
+            for item in items:
+                if isinstance(item, dict):
+                    if _is_product_type(item):
+                        product = _extract_from_jsonld(item, url)
+                        if product:
+                            products.append(product)
+                    elif "item" in item:
+                        inner = item["item"]
+                        if isinstance(inner, dict) and _is_product_type(inner):
+                            product = _extract_from_jsonld(inner, url)
+                            if product:
+                                products.append(product)
+        except (json.JSONDecodeError, Exception):
+            continue
+
+    return products
+
+
+def _is_product_type(item: dict) -> bool:
+    """Check if a JSON-LD item is a Product (handles string or list @type)."""
+    dtype = item.get("@type", "")
+    if isinstance(dtype, list):
+        return "Product" in dtype
+    return dtype == "Product"
+
+
 def _extract_page(html: str, url: str) -> list:
     """
     Extract products from a single listing page HTML.
 
-    Extraction hierarchy:
-      1. Structured row/table detection (row_extractor) — used when the page
-         has a clearly labeled column layout (IMAGE, DESCRIPTION, ITEM, PRICE).
-         This is the highest-fidelity path: it uses the explicit page structure
-         instead of guessing from CSS class names.
-      2. Generic CSS class heuristics (scraper.extract_products) — fallback
-         used when no structured layout is detected.
+    Extraction hierarchy (most reliable → least reliable):
+      1. JSON-LD / Schema.org structured data — present on ~70% of e-commerce
+         sites, schema-validated, consistent field names.
+      2. Structured row/table detection (row_extractor) — for B2B wholesale
+         sites with labeled column layouts.
+      3. Generic CSS class heuristics — last resort fallback.
 
     Called once per page by crawl_listing_pages() in pagination.py.
     Always returns a list — never raises.
     """
-    # ── Layer 1: Structured row/table extraction ──────────────────────────────
+    # ── Layer 1: JSON-LD / Schema.org Product data (highest priority) ────────
+    try:
+        jsonld_products = _extract_jsonld_products(html, url)
+        if jsonld_products:
+            logger.info(
+                f"[Strategy 1] JSON-LD extraction found {len(jsonld_products)} product(s) — "
+                f"using structured data (most reliable path)"
+            )
+            return jsonld_products
+    except Exception as e:
+        logger.warning(f"[Strategy 1] JSON-LD extraction error (falling back): {e}")
+
+    # ── Layer 2: Structured row/table extraction ─────────────────────────────
     try:
         structured = extract_structured(html, url)
         if structured is not None:
@@ -111,57 +173,15 @@ def _extract_page(html: str, url: str) -> list:
     except Exception as e:
         logger.warning(f"[Strategy 1] Structured extraction error (falling back): {e}")
 
-    # ── Layer 2: Generic CSS heuristics ───────────────────────────────────────
+    # ── Layer 3: Generic CSS heuristics ──────────────────────────────────────
     try:
-        logger.info(f"[Strategy 1] No structured layout — running generic heuristics on {url}")
+        logger.info(f"[Strategy 1] No structured data or layout — running generic heuristics on {url}")
         products = extract_products(html, url)
         logger.info(f"[Strategy 1] Generic heuristics found {len(products)} product(s)")
         if products:
             return products
     except Exception as e:
         logger.error(f"[Strategy 1] Generic heuristics failed: {e}")
-
-    # ── Layer 3: JSON-LD / Schema.org Product data ───────────────────────
-    try:
-        from bs4 import BeautifulSoup
-        import json
-        soup = BeautifulSoup(html, "html.parser")
-        products = []
-        for script in soup.find_all("script", type="application/ld+json"):
-            try:
-                data = json.loads(script.string or "")
-                items = []
-                if isinstance(data, list):
-                    items = data
-                elif isinstance(data, dict):
-                    if data.get("@type") == "Product":
-                        items = [data]
-                    elif data.get("@type") in ("ItemList", "CollectionPage", "SearchResultsPage"):
-                        items = data.get("itemListElement", [])
-                    elif "@graph" in data:
-                        items = [i for i in data["@graph"] if isinstance(i, dict) and i.get("@type") == "Product"]
-
-                for item in items:
-                    if isinstance(item, dict) and item.get("@type") == "Product":
-                        product = _extract_from_jsonld(item, url)
-                        if product:
-                            products.append(product)
-                    elif isinstance(item, dict) and "item" in item:
-                        inner = item["item"]
-                        if isinstance(inner, dict) and inner.get("@type") == "Product":
-                            product = _extract_from_jsonld(inner, url)
-                            if product:
-                                products.append(product)
-            except (json.JSONDecodeError, Exception):
-                continue
-
-        if products:
-            logger.info(
-                f"[Strategy 1] JSON-LD extraction found {len(products)} product(s)"
-            )
-            return products
-    except Exception as e:
-        logger.warning(f"[Strategy 1] JSON-LD extraction error (non-fatal): {e}")
 
     return []
 
