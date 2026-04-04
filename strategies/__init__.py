@@ -5,6 +5,5 @@
 # files directly, so the router stays as the single decision point.
 
 from .router import run_best_strategy
-from .universal_pipeline import run_pipeline
 
-__all__ = ["run_best_strategy", "run_pipeline"]
+__all__ = ["run_best_strategy"]
