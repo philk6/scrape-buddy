@@ -30,6 +30,7 @@ import re
 from . import listing, detail
 from .detail import count_product_links, enrich_from_detail_pages
 from .page_classifier import classify as classify_page
+from .universal_pipeline import run_pipeline as run_universal_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -327,51 +328,33 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
         logger.info(f"[Router] Strategy 2 succeeded — {reason}")
         return _result(s2, products_s2, reason)
 
-    # ── Both failed — try Playwright as last resort ──────────────────
-    # Only if we haven't already attempted Playwright at the top of _run
-    if not products_s1 and not playwright_attempted:
-        logger.info(
-            "[Router] Both strategies returned empty on static HTML — "
-            "trying Playwright as last resort"
-        )
-        for wait_ms in [5000, 8000]:
-            pw_html = _try_playwright_render(url, wait_ms=wait_ms)
-            if pw_html is None:
-                break  # Playwright not available
-            if not _static_html_has_product_content(pw_html):
-                logger.info(f"[Router] Playwright last resort ({wait_ms}ms): no product data — retrying")
-                continue
-
-            logger.info(f"[Router] Playwright last resort ({wait_ms}ms): product data found — extracting")
-
-            # Re-run Strategy 1 with JS-rendered HTML
-            products_pw = s1["run"](pw_html, url, use_playwright=True)
-            if products_pw:
-                reason = (
-                    f"Both strategies failed on static HTML, but Playwright "
-                    f"JS-rendering found {len(products_pw)} product(s)"
-                )
-                logger.info(f"[Router] Playwright last resort succeeded — {reason}")
-                return _result(s1, products_pw, reason)
-
-            # Try Strategy 2 with JS-rendered HTML
-            products_pw2 = s2["run"](pw_html, url)
-            if products_pw2:
-                reason = (
-                    f"Both strategies failed on static HTML, but Playwright "
-                    f"+ Strategy 2 found {len(products_pw2)} product(s)"
-                )
-                logger.info(f"[Router] Playwright + Strategy 2 succeeded — {reason}")
-                return _result(s2, products_pw2, reason)
-            break  # Had product content but strategies still couldn't extract — stop retrying
-
-    reason = (
-        f"Both strategies returned few results. "
-        f"The site likely requires JavaScript rendering or blocks automated requests. "
-        f"Showing {len(products_s1)} result(s) from the listing page."
+    # ── Universal Pipeline fallback (Tiers 1→1.5→2→3) ─────────────────
+    # Both legacy strategies failed or returned sparse results.
+    # Hand off to the universal pipeline which adds LLM extraction (Tier 2)
+    # and smarter Playwright integration (Tier 3).
+    logger.info(
+        f"[Router] Legacy strategies returned {len(products_s1)} + {len(products_s2)} products — "
+        f"escalating to Universal Pipeline"
     )
-    logger.warning(f"[Router] Both strategies failed — {reason}")
-    return _result(s1, products_s1, reason)
+    pipeline_result = run_universal_pipeline(html, url, use_playwright=playwright_attempted)
+
+    if pipeline_result.get("products"):
+        logger.info(
+            f"[Router] Universal Pipeline succeeded — "
+            f"{len(pipeline_result['products'])} product(s) via {pipeline_result.get('tier', '?')}"
+        )
+        return pipeline_result
+
+    # ── Nothing worked anywhere — return best partial result ──────────────────
+    best_products = products_s1 or products_s2 or pipeline_result.get("products", [])
+    reason = (
+        f"All extraction methods returned few results. "
+        f"The site may require authentication, have anti-bot protection, "
+        f"or use an unusual rendering approach. "
+        f"Showing {len(best_products)} result(s)."
+    )
+    logger.warning(f"[Router] All methods failed — {reason}")
+    return _result(s1, best_products, reason)
 
 
 def _result(strategy: dict, products: list, reason: str) -> dict:
