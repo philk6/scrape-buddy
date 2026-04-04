@@ -61,7 +61,11 @@ CORS(app)
 database.init_db()
 
 # ── OpenAI ────────────────────────────────────────────────────────────────────
-openai_client = OpenAI()
+# Lazy init: don't crash on startup if OPENAI_API_KEY isn't set yet.
+# The client is only needed for /api/chat — scraping works without it.
+openai_client = None
+if os.environ.get("OPENAI_API_KEY"):
+    openai_client = OpenAI()
 
 CHAT_SYSTEM_PROMPT = """You are a helpful support assistant for The Syndicate Amazon Mastery UPC Scraper.
 
@@ -541,8 +545,13 @@ def chat():
     if not data or not data.get("message", "").strip():
         return jsonify({"error": "Missing 'message'."}), 400
 
+    global openai_client
     if not os.environ.get("OPENAI_API_KEY"):
         return jsonify({"error": "OPENAI_API_KEY is not set."}), 500
+
+    # Lazy-create client if it wasn't available at startup
+    if openai_client is None:
+        openai_client = OpenAI()
 
     try:
         response = openai_client.chat.completions.create(
