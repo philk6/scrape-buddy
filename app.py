@@ -1,21 +1,21 @@
 """
-app.py — The Syndicate Amazon Mastery UPC Scraper — Flask server
+app.py â The Syndicate Amazon Mastery UPC Scraper â Flask server
 
 Routes:
-  GET  /                      → frontend
-  POST /api/scrape            → scrape a URL, save to history, return products
-  GET  /api/history           → list all saved scrape runs
-  GET  /api/history/<id>      → get one run + its products
-  PATCH /api/history/<id>     → rename a run's label
-  DELETE /api/history/<id>    → delete a run (and its products)
-  GET  /api/export/<id>       → download run as .xlsx
-  POST /api/debug             → diagnostic info for a URL
-  POST /api/chat              → AI support chat
+  GET  /                      â frontend
+  POST /api/scrape            â scrape a URL, save to history, return products
+  GET  /api/history           â list all saved scrape runs
+  GET  /api/history/<id>      â get one run + its products
+  PATCH /api/history/<id>     â rename a run's label
+  DELETE /api/history/<id>    â delete a run (and its products)
+  GET  /api/export/<id>       â download run as .xlsx
+  POST /api/debug             â diagnostic info for a URL
+  POST /api/chat              â AI support chat
 
 Environment variables required:
-  OPENAI_API_KEY — your OpenAI API key
+  OPENAI_API_KEY â your OpenAI API key
 
-Run: python app.py  →  http://localhost:5000
+Run: python app.py  â  http://localhost:5000
 """
 
 import io
@@ -36,33 +36,86 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from bs4 import BeautifulSoup
 
-import database
-import browser_login
-import upc_enrichment
-from scraper import fetch_html, debug_scrape, make_auth_fetch_fn
-from strategies import run_best_strategy
-from strategies.detail import run as detail_run
-from strategies import playwright_catalog
-from upc_providers import default_providers
-from pack_parser import enrich_all as enrich_all_pack
+# \u2500\u2500 Defensive imports \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# Some modules may have syntax errors from prior pushes.  Wrap each import
+# so the app can still start and serve the healthcheck on /.
+_boot_warnings = []
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+try:
+    import database
+except Exception as _e:
+    _boot_warnings.append(f'database: {_e}')
+    database = None
+
+try:
+    import browser_login
+except Exception as _e:
+    _boot_warnings.append(f'browser_login: {_e}')
+    browser_login = None
+
+try:
+    import upc_enrichment
+except Exception as _e:
+    _boot_warnings.append(f'upc_enrichment: {_e}')
+    upc_enrichment = None
+
+try:
+    from scraper import fetch_html, debug_scrape, make_auth_fetch_fn
+except Exception as _e:
+    _boot_warnings.append(f'scraper: {_e}')
+    fetch_html = debug_scrape = make_auth_fetch_fn = None
+
+try:
+    from strategies import run_best_strategy
+except Exception as _e:
+    _boot_warnings.append(f'strategies: {_e}')
+    run_best_strategy = None
+
+try:
+    from strategies.detail import run as detail_run
+except Exception as _e:
+    _boot_warnings.append(f'strategies.detail: {_e}')
+    detail_run = None
+
+try:
+    from strategies import playwright_catalog
+except Exception as _e:
+    _boot_warnings.append(f'playwright_catalog: {_e}')
+    playwright_catalog = None
+
+try:
+    from upc_providers import default_providers
+except Exception as _e:
+    _boot_warnings.append(f'upc_providers: {_e}')
+    default_providers = None
+
+try:
+    from pack_parser import enrich_all as enrich_all_pack
+except Exception as _e:
+    _boot_warnings.append(f'pack_parser: {_e}')
+    enrich_all_pack = None
+
+if _boot_warnings:
+    for _w in _boot_warnings:
+        logging.warning(f'[BOOT WARNING] Import failed: {_w}')
+
+# ââ Logging âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
     datefmt="%H:%M:%S",
 )
 
-# ── App setup ─────────────────────────────────────────────────────────────────
+# ââ App setup âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 app = Flask(__name__)
 CORS(app)
 
 # Initialise the database (creates tables if they don't exist)
 database.init_db()
 
-# ── OpenAI ────────────────────────────────────────────────────────────────────
+# ââ OpenAI ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Lazy init: don't crash on startup if OPENAI_API_KEY isn't set yet.
-# The client is only needed for /api/chat — scraping works without it.
+# The client is only needed for /api/chat â scraping works without it.
 openai_client = None
 if os.environ.get("OPENAI_API_KEY"):
     openai_client = OpenAI()
@@ -87,18 +140,18 @@ Help users with:
 - How to view, rename, and delete saved scrapes in the History sidebar
 - Common issues (timeouts, empty results, missing UPC or case pack data)
 
-Keep answers short and practical. Do not refer to the app as Scrape Buddy — it is The Syndicate Amazon Mastery UPC Scraper."""
+Keep answers short and practical. Do not refer to the app as Scrape Buddy â it is The Syndicate Amazon Mastery UPC Scraper."""
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ââ Helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def _auto_label(url: str) -> str:
     """
     Generate a human-readable label from a URL + timestamp.
-    e.g. "example.com — 14:32 19/03/2026"
+    e.g. "example.com â 14:32 19/03/2026"
     """
     domain = urlparse(url).netloc.removeprefix("www.")
     now = datetime.now(timezone.utc).strftime("%H:%M %d/%m/%Y")
-    return f"{domain} — {now}"
+    return f"{domain} â {now}"
 
 
 # All product fields, in display order.
@@ -167,7 +220,7 @@ def _build_xlsx(run: dict) -> io.BytesIO:
     return buf
 
 
-# ── Background workers ────────────────────────────────────────────────────────
+# ââ Background workers ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = False) -> None:
     """
@@ -181,7 +234,7 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
             result["products"], providers=default_providers()
         )
 
-        # ── Data quality metrics ──────────────────────────────────────────
+        # ââ Data quality metrics ââââââââââââââââââââââââââââââââââââââââââ
         products = result["products"]
         total = len(products)
         if total > 0:
@@ -206,7 +259,7 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
                 if most_common_count / has_price > 0.8 and has_price > 5:
                     quality_warnings.append(
                         f"WARNING: {most_common_count}/{has_price} products share the same price "
-                        f"({most_common_price}) — likely a scraping bug"
+                        f"({most_common_price}) â likely a scraping bug"
                     )
 
             if quality_warnings:
@@ -228,7 +281,7 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
             products=result["products"],
         )
         logging.info(
-            f"[Job {run_id}] Completed — {len(result['products'])} product(s)"
+            f"[Job {run_id}] Completed â {len(result['products'])} product(s)"
         )
     except Exception as e:
         logging.exception(f"[Job {run_id}] Scrape worker failed")
@@ -264,7 +317,7 @@ def _run_auth_scrape_worker(
         browser_login.finish_session(session_id)
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# ââ Routes ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.route("/")
 def index():
@@ -279,7 +332,7 @@ def scrape():
     Request body:
         { "url": "https://...", "label": "Optional label" }
 
-    Response (immediate — job still running):
+    Response (immediate â job still running):
         { "run_id": 123, "label": "...", "status": "running" }
 
     The history entry appears right away; poll GET /api/history for updates.
@@ -295,7 +348,7 @@ def scrape():
 
     label = (data.get("label") or "").strip() or _auto_label(url)
 
-    # Fetch HTML synchronously — fast network call, not the slow part.
+    # Fetch HTML synchronously â fast network call, not the slow part.
     # If requests fails or HTML looks empty/blocked, try Playwright as fallback.
     html = None
     fetch_error = None
@@ -304,7 +357,7 @@ def scrape():
         html = fetch_html(url)
     except Exception as e:
         fetch_error = e
-        logging.warning(f"[Scrape] requests fetch failed: {e} — will try Playwright")
+        logging.warning(f"[Scrape] requests fetch failed: {e} â will try Playwright")
 
     # Determine if we need Playwright (fetch failed, blocked, or JS-rendered)
     used_playwright = False
@@ -466,10 +519,10 @@ def auth_scrape():
     the background and return immediately.
 
     Flow:
-      1. confirm_session() — synchronous: browser thread saves cookies to a
-         temp file and closes the visible login browser (typically 2–5 s).
-      2. create_run()      — history entry appears in the sidebar right away.
-      3. Background thread — runs playwright_catalog.run(), enrichment, and
+      1. confirm_session() â synchronous: browser thread saves cookies to a
+         temp file and closes the visible login browser (typically 2â5 s).
+      2. create_run()      â history entry appears in the sidebar right away.
+      3. Background thread â runs playwright_catalog.run(), enrichment, and
          complete_run() / fail_run(). Session cleanup always happens here.
       4. Returns immediately with { run_id, label, status: "running" }.
 
@@ -491,10 +544,10 @@ def auth_scrape():
     if urlparse(url).scheme not in ("http", "https"):
         return jsonify({"error": "URL must start with http:// or https://"}), 400
 
-    # ── Phase: save session state ─────────────────────────────────────────────
+    # ââ Phase: save session state âââââââââââââââââââââââââââââââââââââââââââââ
     # confirm_session() tells the browser thread to export storage state to a
-    # temp file and close the login browser.  Returns a file path string —
-    # NOT a live Playwright object — so no cross-thread greenlet issues are
+    # temp file and close the login browser.  Returns a file path string â
+    # NOT a live Playwright object â so no cross-thread greenlet issues are
     # possible.
     state_file = browser_login.confirm_session(session_id)
     if state_file is None:
@@ -511,10 +564,10 @@ def auth_scrape():
 
     label = label or _auto_label(url)
 
-    # ── Phase 2: create history record immediately ────────────────────────────
+    # ââ Phase 2: create history record immediately ââââââââââââââââââââââââââââ
     run_id = database.create_run(label=label, source_url=url)
 
-    # ── Phase 3: launch Playwright scrape in background ───────────────────────
+    # ââ Phase 3: launch Playwright scrape in background âââââââââââââââââââââââ
     # The worker owns session cleanup (finish_session) regardless of outcome.
     threading.Thread(
         target=_run_auth_scrape_worker,
@@ -528,7 +581,7 @@ def auth_scrape():
 
 @app.route("/api/debug", methods=["POST"])
 def debug():
-    """Diagnostic info for a URL — does not save to history."""
+    """Diagnostic info for a URL â does not save to history."""
     data = request.get_json(silent=True)
     if not data or not data.get("url"):
         return jsonify({"error": "Missing 'url'."}), 400
@@ -540,7 +593,7 @@ def debug():
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    """AI support chat — stateless, no history stored."""
+    """AI support chat â stateless, no history stored."""
     data = request.get_json(silent=True)
     if not data or not data.get("message", "").strip():
         return jsonify({"error": "Missing 'message'."}), 400
