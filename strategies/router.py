@@ -30,7 +30,7 @@ import re
 from . import listing, detail
 from .detail import count_product_links, enrich_from_detail_pages
 from .page_classifier import classify as classify_page
-from .universal_pipeline import run_pipeline as run_universal_pipeline
+# universal_pipeline import is lazy — see _run() — to keep startup fast
 
 logger = logging.getLogger(__name__)
 
@@ -336,6 +336,7 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
         f"[Router] Legacy strategies returned {len(products_s1)} + {len(products_s2)} products — "
         f"escalating to Universal Pipeline"
     )
+    from .universal_pipeline import run_pipeline as run_universal_pipeline
     pipeline_result = run_universal_pipeline(html, url, use_playwright=playwright_attempted)
 
     if pipeline_result.get("products"):
