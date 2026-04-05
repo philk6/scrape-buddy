@@ -16,19 +16,19 @@ _CPG_BRAND_PATTERNS = [
     r'^(WACKY WAFERS)\b',
     r'^(WACK-O-WAX)\b',
     r'^(SWEDISH FISH)\b',
-    r'^(ZOTZI[\s\-]?)\b',
+    r'^(ZOTZ)\b',
     r'^(ZEBRA BARS)\b',
     r'^(SUGAR DADDY)\b',
     r'^(SUPER MARIO)\b',
     # Wholesale/CPG brands
-    r'^(KRAFT|NESTL[EÃÂ]|GENERAL MI0STS<KELLOGG|MONDELEZ|TYSON|HORMEL|HEINZ|PEPSI|COCA[\s\-]?COLA)\b',
+    r'^(KRAFT|NESTL[EÉ]|GENERAL MILLS|KELLOGG|MONDELEZ|TYSON|HORMEL|HEINZ|PEPSI|COCA[\s\-]?COLA)\b',
     r'^(SYSCO|US FOODS|FOOD SERVICE|RESTAURANT DEPOT)\b',
-    r'^(PROCTER[\s\-]?GAMBLEBS[\s\-]?&[\s\-]?G)\b',
+    r'^(PROCTER[\s\-]?GAMBLE|P[\s\-]?&[\s\-]?G)\b',
     r'^(UNILEVER|JOHNSON[\s\-]?&[\s\-]?JOHNSON|J[\s\-]?&[\s\-]?J)\b',
     r'^(CAMPBELL|DELMONTEFOODS|CONAGRA)\b',
-    r'^(CLOROX|LYSOL|BOUNTY|CHARMINI\b',
+    r'^(CLOROX|LYSOL|BOUNTY|CHARMIN)\b',
     r'^(FRITO[\s\-]?LAY|LAY[\s\-]?S|DORITOS|CHEETOS|TOSTITOS)\b',
-    r'^(RED BULL|MONSTER{ENERGY|GATORADE|POWERADE)\b',
+    r'^(RED BULL|MONSTER|ENERGY|GATORADE|POWERADE)\b',
 ]
 
 _CASE_PATTERNS = [
@@ -114,7 +114,7 @@ def _promote_pack_size_to_unit_size(product: dict[str, Any]) -> None:
     if (product.get('unit_size') or '').strip():
         return
     pack_size = (product.get('pack_size') or '').strip()
-    if re.fullmatch(r'\d+(?:\.\d+)?\s*(?:OZ|FL OZ|LB|G|CT|ML)$', pack_size, re.IGNORECASE):
+    if re.fullmatch(r'\d+(?:\.\d+)?\s*(?:OZ|FL OZ|LB|G|CT|ML)', pack_size, re.IGNORECASE):
         product['unit_size'] = pack_size.upper().replace('  ', ' ')
 
 
