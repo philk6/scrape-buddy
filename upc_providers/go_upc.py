@@ -112,7 +112,7 @@ class GoUPCProvider(UpcLookupProvider):
                 if attempt == 0:
                     time.sleep(1.5)
                     continue
-                payload = {"status": "provider_unavailable", "propider_status": "exception", "reason": str(e)}
+                payload = {"status": "provider_unavailable", "provider_status": "exception", "reason": str(e)}
                 set_cached_query(self.name, query, payload)
                 return payload
         else:
