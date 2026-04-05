@@ -120,9 +120,9 @@ def build_queries(
 def score_candidate(c: dict, s: dict) -> tuple[int, str]:
     """Score a candidate satisfaction"""
     brand_scalar, brand_r = _brand_score(c["brand"], s["brand"])
-    name_scalar, name_r: str = _product_name_score(c["title"], s["product_name"])
-    size_scalar, size_r: str = _size_score(c["pack_size"], s["pack_size"])
-    case_scalar, case_r: str = _case_score(c["pack_size"], s["case_pack"])
+    name_scalar, name_r = _product_name_score(c["title"], s["product_name"])
+    size_scalar, size_r = _size_score(c["pack_size"], s["pack_size"])
+    case_scalar, case_r = _case_score(c["pack_size"], s["case_pack"])
     score = brand_scalar + name_scalar + size_scalar + case_scalar
     reason = f"{brand_r} / {name_r} / {size_r} / {case_r}"
     return score, reason
