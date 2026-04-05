@@ -1,15 +1,15 @@
 """
-pack_parser.py — Reusable pack size / case pack extraction and normalization
+pack_parser.py â Reusable pack size / case pack extraction and normalization
 
 Parses compact supplier strings like 4/1GAL, 6/2.5LB, 12/32OZ, 24/1CT
 into structured output usable across all supplier sites.
 
 Output fields added to each product:
-    raw_pack_text     (str) — original text the parse was sourced from
-    case_pack         (str) — number of units per case, e.g. "4"
-    pack_size         (str)  — size of each unit, e.g. "1 GAL"
-    unit_measure      (str) — canonical unit only, e.g. "GAL"
-    pack_confidence   (str)  — "high" | "medium" | "low" | ""
+    raw_pack_text     (str) â original text the parse was sourced from
+    case_pack         (str) â number of units per case, e.g. "4"
+    pack_size         (str)  â size of each unit, e.g. "1 GAL"
+    unit_measure      (str) â canonical unit only, e.g. "GAL"
+    pack_confidence   (str)  â "high" | "medium" | "low" | ""
 
 Usage:
     from pack_parser import enrich_all, enrich_product_pack, parse_pack_string
@@ -24,7 +24,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# ── Unit normalization ─────────────────────────────────────────────────────────
+# ââ Unit normalization âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 _UNIT_MAP = {
     # Fluid / liquid
@@ -97,14 +97,14 @@ def _fmt_pack_size(qty: str, unit: str) -> str:
     return f"{qty} {unit}".strip() if unit else qty
 
 
-# ── Core pattern matching ──────────────────────────────────────────────────────
+# ââ Core pattern matching ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 # Number pattern: integer or decimal
 _NUM = r"(\d+(?:\.\d+)?)"
 # Optional whitespace
 _SP  = r"\s*"
 
-# Layer 1 — EA/CS split: "1 GAL EA, 4/CS"  or  "1 GAL, 4/CS"
+# Layer 1 â EA/CS split: "1 GAL EA, 4/CS"  or  "1 GAL, 4/CS"
 _EACS_RE = re.compile(
     r"(\d+(?:\.\d+)?)" + _SP + r"(" + _UNIT_RE.pattern + r")" + _SP +
     r"(?:ea|each)?" + _SP + r"[,,;]?" + _SP +
@@ -112,50 +112,50 @@ _EACS_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Layer 2 — Compact slash with size+unit: "4/1GAL", "6/2.5LB", "12/32OZ"
+# Layer 2 â Compact slash with size+unit: "4/1GAL", "6/2.5LB", "12/32OZ"
 _COMPACT_RE = re.compile(
     r"(\d+)" + _SP + r"[/\\]" + _SP + _NUM + _SP + r"("  + _UNIT_RE.pattern + r")",
     re.IGNORECASE,
 )
 
-# Layer 3 — Count-only slash:"60/EA", "24/CS"
+# Layer 3 â Count-only slash:"60/EA", "24/CS"
 _COUNT_ONLY_RE = re.compile(
     r"(\d+)" + _SP + r"[/\\]" + _SP + r"(ea|each|cs|case|ct|count|pk|pack)\b",
     re.IGNORECASE,
 )
 
-# Layer 4 — Reversed slash: "5.7OZ/12PK", "64OZ/4PK"
+# Layer 4 â Reversed slash: "5.7OZ/12PK", "64OZ/4PK"
 _REVERSED_RE = re.compile(
     _NUM + _SP + r"(" + _UNIT_RE.pattern + r")" + _SP + r"[/\\]"  + _SP +
     r"(\d+)" + _SP + r"(?:pk|pack|cs|case|ct)\b",
     re.IGNORECASE,
 )
 
-# Layer 5 — Cross-multiply: "4 x 1 gal", "4× 1GAL", "4 * 1 gal"
+# Layer 5 â Cross-multiply: "4 x 1 gal", "4Ã 1GAL", "4 * 1 gal"
 _CROSS_RE = re.compile(
-    r"(\d+)" + _SP + r"[x×*]" + _SP + _NUM + _SP + r"("  + _UNIT_RE.pattern + r")?",
+    r"(\d+)" + _SP + r"[xÃ*]" + _SP + _NUM + _SP + r"("  + _UNIT_RE.pattern + r")?",
     re.IGNORECASE,
 )
 
-# Layer 6 — Dash-separated: "4-1gal"
+# Layer 6 â Dash-separated: "4-1gal"
 _DASH_RE = re.compile(
     r"(\d+)-" + _NUM + r"("  + _UNIT_RE.pattern + r")",
     re.IGNORECASE,
 )
 
-# Layer 7 —  "case of N" / "case pack: N" / "case pack N"
+# Layer 7 â  "case of N" / "case pack: N" / "case pack N"
 _CASE_OF_RE = re.compile(
     r"\bcase\s+(?:of|pack:?)\s+(\d+)\b",
     re.IGNORECASE,
 )
 
-# Layer 8 — "N per case"
+# Layer 8 â "N per case"
 _PER_CASE_RE = re.compile(
     r"(\d+)\s+per\s+case",
     re.IGNORECASE,
 )
 
-# Layer 9 — Plain size only: "1 GAL", "32 OZ"
+# Layer 9 â Plain size only: "1 GAL", "32 OZ"
 _PLAIN_SIZE_RE = re.compile(
     _NUM + _SP + r"("  + _UNIT_RE.pattern + r")\b",
     re.IGNORECASE,
@@ -176,7 +176,7 @@ def parse_pack_string(text: str) -> dict | None:
 
     t = text.strip()
 
-    # ── Layer 1: EA/CS split ("1 GAL EA, 4/CS") ─────────────────────────────────────────
+    # ââ Layer 1: EA/CS split ("1 GAL EA, 4/CS") âââââââââââââââââââââââââââââââââââââââââ
     m = _EACS_RE.search(t)
     if m:
         qty  = m.group(1)
@@ -191,7 +191,7 @@ def parse_pack_string(text: str) -> dict | None:
             "pack_method":     "eacs_split",
         }
 
-    # ── Layer 2: Compact slash with size+unit ("4/1GAL") ─────────────────────────────────────────────────────────
+    # ââ Layer 2: Compact slash with size+unit ("4/1GAL") âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     m = _COMPACT_RE.search(t)
     if m:
         case = m.group(1)
@@ -206,7 +206,7 @@ def parse_pack_string(text: str) -> dict | None:
             "pack_method":     "compact_slash",
         }
 
-    # ── Layer 3: Count-only slash ("60/EA", "24/CS") ─────────────────────────
+    # ââ Layer 3: Count-only slash ("60/EA", "24/CS") âââââââââââââââââââââââââ
     m = _COUNT_ONLY_RE.search(t)
     if m:
         case = m.group(1)
@@ -220,7 +220,7 @@ def parse_pack_string(text: str) -> dict | None:
             "pack_method":     "count_only_slash",
         }
 
-    # ── Layer 4: Reversed slash ("5.7OZ/12PK") ───────────────────────────────
+    # ââ Layer 4: Reversed slash ("5.7OZ/12PK") âââââââââââââââââââââââââââââââ
     m = _REVERSED_RE.search(t)
     if m:
         qty  = m.group(1)
@@ -235,7 +235,7 @@ def parse_pack_string(text: str) -> dict | None:
             "pack_method":     "reversed_slash",
         }
 
-    # ── Layer 5: Cross-multiply ("4 x 1 gal") ───────────────────────────────────────────────────────────
+    # ââ Layer 5: Cross-multiply ("4 x 1 gal") âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     m = _CROSS_RE.search(t)
     if m:
         case = m.group(1)
@@ -251,7 +251,7 @@ def parse_pack_string(text: str) -> dict | None:
             "pack_method":     "cross_multiply",
         }
 
-    # ── Layer 6: Dash ("4-1gal") ───────────────────────────────────────────────────────────
+    # ââ Layer 6: Dash ("4-1gal") âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     m = _DASH_RE.search(t)
     if m:
         case = m.group(1)
@@ -266,7 +266,7 @@ def parse_pack_string(text: str) -> dict | None:
             "pack_method":     "dash_separator",
         }
 
-    # ── Layer 7: "case of N" ─────────────────────────────────────────────────────────
+    # ââ Layer 7: "case of N" âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     m = _CASE_OF_RE.search(t)
     if m:
         return {
@@ -278,7 +278,7 @@ def parse_pack_string(text: str) -> dict | None:
             "pack_method":      "case_of",
         }
 
-    # ── Layer 8: "N per case" ────────────────────────────────────────────────────────
+    # ââ Layer 8: "N per case" ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     m = _PER_CASE_RE.search(t)
     if m:
         return {
@@ -290,7 +290,7 @@ def parse_pack_string(text: str) -> dict | None:
             "pack_method":      "per_case",
         }
 
-    # ── Layer 9: Plain size only ("1 GAL", "32 OZ") ──────────────────────────
+    # ââ Layer 9: Plain size only ("1 GAL", "32 OZ") ââââââââââââââââââââââââââ
     m = _PLAIN_SIZE_RE.search(t)
     if m:
         qty  = m.group(1)
@@ -307,7 +307,7 @@ def parse_pack_string(text: str) -> dict | None:
     return None
 
 
-# ── Title parsing (Layer 4 of product enrichment) ─────────────────────────────
+# ââ Title parsing (Layer 4 of product enrichment) âââââââââââââââââââââââââââââ
 
 _TITLE_DELIMITERS = re.compile(r"[,|;\u2013\u2014]|--|\s{2,}")
 
@@ -327,7 +327,7 @@ def _parse_from_title(title: str) -> dict | None:
             continue
         result = parse_pack_string(seg)
         if result:
-            # downgrade high ⚚medium since we're parsing a title
+            # downgrade high âmedium since we're parsing a title
             if result["pack_confidence"] == "high":
                 result["pack_confidence"] = "medium"
             result["pack_method"] = f"title:{result['pack_method']}"
@@ -335,10 +335,10 @@ def _parse_from_title(title: str) -> dict | None:
     return None
 
 
-# ── Single-product enrichment ────────────────────────────────────────────────────────────
+# ââ Single-product enrichment ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def enrich_product_pack(product: dict) -> dict:
-   """
+    """
     Add pack enrichment fields to a single product dict (modified in place).
 
     Source priority:
@@ -355,7 +355,7 @@ def enrich_product_pack(product: dict) -> dict:
 
     result = None
 
-    # Layer 1 — pack_size field
+    # Layer 1 â pack_size field
     if pack_size_raw:
         result = parse_pack_string(pack_size_raw)
         if result:
@@ -364,7 +364,7 @@ def enrich_product_pack(product: dict) -> dict:
                 f"'{pack_size_raw}'"
             )
 
-    # Layer 2 — case_pack field
+    # Layer 2 â case_pack field
     if not result and case_pack_raw:
         result = parse_pack_string(case_pack_raw)
         if result:
@@ -373,7 +373,7 @@ def enrich_product_pack(product: dict) -> dict:
                 f"'{case_pack_raw}'"
             )
 
-    # Layer 3 — combined fields
+    # Layer 3 â combined fields
     if not result and (pack_size_raw or case_pack_raw):
         combined = " ".join(filter(None, [case_pack_raw, pack_size_raw]))
         result = parse_pack_string(combined)
@@ -383,7 +383,7 @@ def enrich_product_pack(product: dict) -> dict:
                 f"'{combined}'"
             )
 
-    # Layer 4 — product_name title parsing
+    # Layer 4 â product_name title parsing
     if not result and product_name:
         result = _parse_from_title(product_name)
         if result:
@@ -410,7 +410,7 @@ def enrich_product_pack(product: dict) -> dict:
     return product
 
 
-# ── Bulk enrichment ────────────────────────────────────────────────────────────
+# ââ Bulk enrichment ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def enrich_all(products: list) -> list:
     """
@@ -432,7 +432,7 @@ def enrich_all(products: list) -> list:
             missing += 1
 
     logger.info(
-        f"[PackParser] Complete ──"
+        f"[PackParser] Complete ââ"
         f""{high} high | {medium} medium | {low} low | {missing} no match"
     )
     return products
