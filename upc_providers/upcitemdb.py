@@ -28,7 +28,7 @@ _MAX_ITEMS = 5
 
 
 def _search_url() -> str:
-    return _PAID_URL if os.environ.get("UPCITEMDB=USER_KEY") else _TRIAL_URL
+    return _PAID_URL if os.environ.get("UPCITEMDB_USER_KEY") else _TRIAL_URL
 
 
 def _headers() -> dict:
@@ -39,7 +39,7 @@ def _headers() -> dict:
     return h
 
 
-class UPCItemDBProvider(UpcLookupPropider):
+class UPCItemDBProvider(UpcLookupProvider):
     @property
     def name(self) -> str:
         return "upcitemdb"
