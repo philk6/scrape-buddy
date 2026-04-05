@@ -1,5 +1,5 @@
 """
-strategies/page_classifier.py â€” Lightweight page-type detection
+strategies/page_classifier.py ÃƒÂ¢Ã¢Â‚Â¬Ã¢Â€Â Lightweight page-type detection
 
 classify(html, url) returns a ClassificationResult with:
   .type        one of: "listing_grid", "row_catalog", "detail_page",
@@ -12,7 +12,7 @@ router code like  `if page_type == "row_catalog"`  continues to work
 without modification.
 
 Used by router.py to tune strategy selection without adding extra HTTP requests.
-All classification is done on the already-fetched HTML â€” zero extra requests.
+All classification is done on the already-fetched HTML ÃƒÂ¢Ã¢Â‚Â¬Ã¢Â€Â zero extra requests.
 """
 
 import dataclasses
@@ -32,14 +32,14 @@ class ClassificationResult:
     Attributes:
         type:       One of listing_grid | row_catalog | detail_page |
                     js_app | login_required
-        confidence: Float â€“1.  Rough estimate; not a calibrated probability.
+        confidence: Float ÃƒÂ¢Ã¢Â‚Â¬Ã¢Â€Âœ1.  Rough estimate; not a calibrated probability.
         reason:     One-line human-readable explanation of the decision.
     """
     type:       str
     confidence: float
     reason:     str
 
-    #â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€(€€€‘•˜}}•Å}|¡Í•±˜°½Ñ¡•È¤è(€€€€€€€¥˜¥Í¥¹ÍÑ…¹”¡½Ñ¡•È°ÍÑÈ¤è(€€€€€€€€€€€É•ÑÕÉ¸Í•±˜¹ÑåÁ”€ôô½Ñ¡•È(€€€€€€€¥˜¥Í¥¹ÍÑ…¹”¡½Ñ¡•È°±…ÍÍ¥™¥…Ñ¥½¹I•ÍÕ±Ğ¤è(€€€€€€€€€€€É•ÑÕÉ¸Í•±˜¹ÑåÁ”€ôô½Ñ¡•È¹ÑåÁ”(€€€€€€€É•ÑÕÉ¸9½Ñ%µÁ±•µ•¹Ñ•((€€€‘•˜}}¹•}|¡Í•±˜°½Ñ¡•È¤è(€€€€€€€É•ÍÕ±Ğ€ôÍ•±˜¹}}•Å}|¡½Ñ¡•È¤(€€€€€€€É•ÑÕÉ¸É•ÍÕ±Ğ¥˜É•ÍÕ±Ğ¥Ì9½Ñ%µÁ±•µ•¹Ñ••±Í”¹½ĞÉ•ÍÕ±Ğ((€€€‘•˜}}¡…Í¡}|¡Í•±˜¤è(€€€€€€€É•ÑÕÉ¸¡…Í ¡Í•±˜¹ÑåÁ”¤((€€€‘•˜}}ÍÑÉ}|¡Í•±˜¤è(€€€€€€€É•ÑÕÉ¸Í•±˜¹ÑåÁ”((€€€‘•˜}}É•ÁÉ}|¡Í•±˜¤è(€€€€€€€É•ÑÕÉ¸€ (€€€€€€€€€€€˜‰±…ÍÍ¥™¥…Ñ¥½¹I•ÍÕ±Ğ¡ÑåÁ”õíÍ•±˜¹ÑåÁ”…Éô°€ˆ(€€€€€€€€€€€˜‰½¹™¥‘•¹”õíÍ•±˜¹½¹™¥‘•¹”è¸É™ô°É•…Í½¸õíÍ•±˜¹É•…Í½¸…Éô¤ˆ(€€€€€€€€¤((Œ5¥¹¥µÕ´Ñ•áĞ½¹Ñ•¹Ğ±•¹Ñ ‰•±½Üİ¡¥ İ”ÍÕÍÁ•Ğ„)LµÉ•¹‘•É•Í¡•±°Á…”)})M}AA_II:_CONTENT = 500
+    # â”€â”€ String-comparison transparency â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 # Minimum number of product-card-like elements to count as a listing_grid
 _LISTING_GRID_MIN_CARDS = 3
@@ -65,7 +65,7 @@ _LOGIN_SIGNALS = [
 ]
 
 # JS framework signals in page source
-_JS_FRAMEWORK_PATTERNQ€C = [
+_JS_FRAMEWORK_PATTERNQÃ¢Â‚Â¬C = [
     r"__NEXT_DATA__",
     r"window\.__nuxt__",
     r"window\.React",
