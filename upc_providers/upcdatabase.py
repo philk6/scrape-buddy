@@ -82,3 +82,56 @@ class UPCDatabaseProvider(UpcLookupProvider):
                 "reason": "no provider candidate met the confidence threshold",
             }
         return best_result
+
+    def _search(self, query: str) -> dict:
+        cached = get_cached_query(self.name, query)
+        if cached:
+            return cached
+
+        url = f"{_SEARCH_URL}?query={quote_plus(query)}&page=1"
+        for attempt in range(2):
+            try:
+                resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+                if resp.status_code in _RETRYABLE:
+                    if attempt == 0:
+                        time.sleep(1.5)
+                        continue
+                    status_name = "rate_limited" if resp.status_code == 429 else "service_unavailable"
+                    mark_provider_status(self.name, status_name, cooldown_seconds=600)
+                    payload = {"status": "provider_unavailable", "provider_status": str(resp.status_code), "reason": f"UPCDatabase returned {resp.status_code}"}
+                    set_cached_query(self.name, query, payload)
+                    return payload
+                if resp.status_code in {400, 403}:
+                    payload = {"status": "provider_unavailable", "provider_status": str(resp.status_code), "reason": f"UPCDatabase returned {resp.status_code}"}
+                    set_cached_query(self.name, query, payload)
+                    return payload
+                resp.raise_for_status()
+                data = resp.json()
+                break
+            except Exception as e:
+                if attempt == 0:
+                    time.sleep(1.5)
+                    continue
+                payload = {"status": "provider_unavailable", "provider_status": "exception", "reason": str(e)}
+                set_cached_query(self.name, query, payload)
+                return payload
+        else:
+            payload = {"status": "provider_unavailable", "provider_status": "unknown", "reason": "request loop exhausted"}
+            set_cached_query(self.name, query, payload)
+            return payload
+
+        items = data.get("items", []) if isinstance(data, dict) else []
+        candidates = []
+        for item in items:
+            upc = str(item.get("barcode") or "").strip()
+            if not upc.isdigit() or not (8 <= len(upc) <= 14):
+                continue
+            candidates.append({
+                "upc": upc,
+                "title": str(item.get("title") or "").strip(),
+                "brand": str(item.get("brand") or "").strip(),
+                "pack_size": str(item.get("description") or "").strip(),
+            })
+        payload = {"status": "ok" if candidates else "no_results", "candidates": candidates}
+        set_cached_query(self.name, query, payload)
+        return payload
