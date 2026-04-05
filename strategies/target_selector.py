@@ -1,5 +1,5 @@
 """
-strategies/target_selector.py — Product-target selection engine
+strategies/target_selector.py â Product-target selection engine
 
 For every detected product row/card, discovers all clickable candidates,
 scores them by likelihood of leading to rich product-detail data, then
@@ -7,22 +7,22 @@ provides a fetch + validate + fallback loop so the scraper always ends up
 on the most information-dense page available.
 
 Public API
-──────────
+ââââââââââ
   discover_candidates(container, base_url)
-      → list[Candidate]  (sorted by score, descending)
+      â list[Candidate]  (sorted by score, descending)
 
   validate_rich_detail(html)
-      → RichDetailResult  (score + signal list + is_rich flag)
+      â RichDetailResult  (score + signal list + is_rich flag)
 
   select_best_target(candidates, fetch_fn, row_index)
-      → (url, html, RichDetailResult) | None
+      â (url, html, RichDetailResult) | None
         Fetches candidates in score order, validates each, returns the first
         "rich" one.  Falls back to the best non-rich result if none pass.
 
 Integration points in detail.py
-────────────────────────────────
+ââââââââââââââââââââââââââââââââ
   Pass 0  (_collect_product_links_with_alternatives):
-    discover_candidates() per container — scoring only, no extra fetches.
+    discover_candidates() per container â scoring only, no extra fetches.
     primary = candidates[0].url
     alternatives = [c.url for c in candidates[1:]]
 
@@ -47,7 +47,7 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 
-# ── Candidate scoring signals ────────────────────────────────────────────────
+# ââ Candidate scoring signals ââââââââââââââââââââââââââââââââââââââââââââââââ
 
 # Context keywords found IN THE CONTAINER TEXT that indicate rich product data nearby
 _HIGH_VALUE_CONTEXT_KEYWORDS = [
@@ -71,7 +71,7 @@ _ACTION_TEXTS = [
     "purchase", "add to order", "buy",
 ]
 
-# Navigation / utility text — these are NOT product detail links
+# Navigation / utility text â these are NOT product detail links
 _NAV_TEXTS = [
     "view all", "see all", "shop all", "browse", "next", "previous",
     "prev", "back", "home", "filter", "sort", "contact",
@@ -101,7 +101,7 @@ _REJECT_URL_FRAGMENTS = [
 ]
 
 
-# ── Rich-detail validation signals ───────────────────────────────────────────
+# ââ Rich-detail validation signals âââââââââââââââââââââââââââââââââââââââââââ
 
 # Label strings whose presence in page text indicates rich product data
 _RICH_LABEL_SIGNALS = [
@@ -136,14 +136,14 @@ _RICH_LABEL_SIGNALS = [
 # Minimum accumulated score to consider a page "rich"
 RICH_DETAIL_THRESHOLD = 4
 
-# Minimum score for a candidate to be tried at all (< this → skip)
+# Minimum score for a candidate to be tried at all (< this â skip)
 CANDIDATE_MIN_SCORE = 1
 
 # Max candidates to try per row before giving up
 MAX_CANDIDATES_PER_ROW = 5
 
 
-# ── Data classes ──────────────────────────────────────────────────────────────
+# ââ Data classes ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @dataclass
 class Candidate:
@@ -165,21 +165,21 @@ class RichDetailResult:
     is_rich:       bool
 
 
-# ── Candidate discovery ───────────────────────────────────────────────────────
+# ââ Candidate discovery âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def discover_candidates(container, base_url: str) -> list[Candidate]:
     """
     Extract ALL clickable candidates from a product card/row element.
 
     Sources:
-      1. <a href="...">  — standard anchor links
-      2. onclick="location.href='...'"  — JavaScript navigation
-      3. data-href / data-url / data-link / data-product-url — data-attribute URLs
+      1. <a href="...">  â standard anchor links
+      2. onclick="location.href='...'"  â JavaScript navigation
+      3. data-href / data-url / data-link / data-product-url â data-attribute URLs
 
     Each candidate is scored immediately. Returns the list sorted by score
     descending so candidates[0] is always the best choice.
 
-    Never raises — returns [] on error.
+    Never raises â returns [] on error.
     """
     try:
         base_netloc = urlparse(base_url).netloc
@@ -187,7 +187,7 @@ def discover_candidates(container, base_url: str) -> list[Candidate]:
         candidates: list[Candidate] = []
         seen_urls: set[str] = set()
 
-        # ── Source 1: <a href> ──────────────────────────────────────────────────────
+        # ââ Source 1: <a href> ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
         for a in container.find_all("a", href=True):
             href = (a.get("href") or "").strip()
             if not href or href.startswith(("javascript:", "mailto:", "tel:", "#")):
@@ -208,8 +208,8 @@ def discover_candidates(container, base_url: str) -> list[Candidate]:
             _score_candidate(c, container_text)
             candidates.append(c)
 
-        # ── Source 2: onclick navigation ──────────────────────────────────────
-       _ONCLICK_RE = re.compile(
+        # ââ Source 2: onclick navigation ââââââââââââââââââââââââââââââââââââââ
+        _ONCLICK_RE = re.compile(
             r"(?:location\.href|window\.location(?:\.href)?)\s*=\s*\['\"]([^'\"]+)['\"]",
             re.IGNORECASE,
         )
@@ -237,7 +237,7 @@ def discover_candidates(container, base_url: str) -> list[Candidate]:
             _score_candidate(c, container_text)
             candidates.append(c)
 
-        # ── Source 3: data-href / data-url / data-link / data-product-url ─────
+        # ââ Source 3: data-href / data-url / data-link / data-product-url âââââ
         for attr in ["data-href", "data-url", "data-link", "data-product-url",
                      "data-pdp-url", "data-item-url"]:
             for el in container.find_all(attrs={attr: True}):
@@ -291,7 +291,7 @@ def _score_candidate(c: Candidate, container_text: str) -> None:
     url_lower = c.url.lower()
     text_lower = c.text.lower().strip()
 
-    # ── URL signals ───────────────────────────────────────────────────────────
+    # ââ URL signals âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     rejected_by_url = False
     for frag in _REJECT_URL_FRAGMENTS:
         if frag in url_lower:
@@ -322,9 +322,9 @@ def _score_candidate(c: Candidate, container_text: str) -> None:
         except Exception:
             pass
 
-    # ── Candidate text signals ────────────────────────────────────────────────
+    # ââ Candidate text signals ââââââââââââââââââââââââââââââââââââââââââââââââ
     if not text_lower:
-        # Empty text = image-only link — usually a product tile image
+        # Empty text = image-only link â usually a product tile image
         score += 1
         reasons.append("img_link")
     elif any(kw in text_lower for kw in _NAV_TEXTS):
@@ -340,18 +340,18 @@ def _score_candidate(c: Candidate, container_text: str) -> None:
         score -= 1
         reasons.append("long_text")
 
-    # ── Image-wrap bonus ──────────────────────────────────────────────────────
+    # ââ Image-wrap bonus ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     if c.wraps_image:
         score += 2
         reasons.append("wraps_img")
 
-    # ── Source bonus (data attributes are usually intentional product links) ──
+    # ââ Source bonus (data attributes are usually intentional product links) ââ
     if c.source in ("data-href", "data-url", "data-product-url",
                     "data-pdp-url", "data-item-url"):
         score += 2
         reasons.append("data_attr")
 
-    # ── Container context bonus ───────────────────────────────────────────────
+    # ââ Container context bonus âââââââââââââââââââââââââââââââââââââââââââââââ
     # How many high-value data keywords appear anywhere in the container?
     context_hits = sum(1 for kw in _HIGH_VALUE_CONTEXT_KEYWORDS if kw in container_text)
     if context_hits >= 5:
@@ -365,7 +365,7 @@ def _score_candidate(c: Candidate, container_text: str) -> None:
     c.reasons = reasons
 
 
-# ── Rich-detail validation ────────────────────────────────────────────────────
+# ââ Rich-detail validation ââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def validate_rich_detail(html: str) -> RichDetailResult:
     """
@@ -374,7 +374,7 @@ def validate_rich_detail(html: str) -> RichDetailResult:
 
     Scoring:
       JSON-LD Product schema    +3  (strongest structural signal)
-      UPC/barcode digit string  +2  (8–14 digit number near a label)
+      UPC/barcode digit string  +2  (8â14 digit number near a label)
       Structured spec table     +1  (dl/dt/dd or multi-row table)
       Each matching label kw    +N  (see _RICH_LABEL_SIGNALS)
 
@@ -402,7 +402,7 @@ def validate_rich_detail(html: str) -> RichDetailResult:
                 signals.append(kw)
                 score += pts
 
-        # UPC/barcode-like digit string (8–14 consecutive digits)
+        # UPC/barcode-like digit string (8â14 consecutive digits)
         if re.search(r"\b\d{8,14}\b", page_text):
             signals.append("upc_digits")
             score += 2
@@ -426,7 +426,7 @@ def validate_rich_detail(html: str) -> RichDetailResult:
     return RichDetailResult(score=score, signals_found=signals, is_rich=is_rich)
 
 
-# ── Target selection with fetch + fallback ────────────────────────────────────
+# ââ Target selection with fetch + fallback ââââââââââââââââââââââââââââââââââââ
 
 def select_best_target(
     candidates: list[Candidate],
@@ -483,17 +483,17 @@ def select_best_target(
             if rich.is_rich:
                 logger.info(
                     f"[TargetSelector] Row {row_index}: "
-                    f"✓ accepted candidate [{rank}] ▒ rich detail confirmed"
+                    f"â accepted candidate [{rank}] â rich detail confirmed"
                 )
                 return candidate.url, html, rich
 
-            # Not rich enough — keep as fallback if it's the best so far
+            # Not rich enough â keep as fallback if it's the best so far
             if best_fallback is None or rich.score > best_fallback[2].score:
                 best_fallback = (candidate.url, html, rich)
 
             logger.info(
                 f"[TargetSelector] Row {row_index} [{rank}]: "
-                f"✗ not rich (score={rich.score} < threshold={RICH_DETAIL_THRESHOLD}) — "
+                f"â not rich (score={rich.score} < threshold={RICH_DETAIL_THRESHOLD}) â "
                 f"{'trying next candidate' if rank < min(len(viable), MAX_CANDIDATES_PER_ROW) else 'no more candidates'}"
             )
 
@@ -509,7 +509,7 @@ def select_best_target(
         url, html, rich = best_fallback
         logger.info(
             f"[TargetSelector] Row {row_index}: "
-            f"no rich target found — using best fallback "
+            f"no rich target found â using best fallback "
             f"(validation score={rich.score}, url={url!r})"
         )
         return best_fallback
