@@ -36,10 +36,10 @@ def _extract_size_signal(text: str) -> str:
 
 def _extract_case_signal(text: str) -> str:
     text = str(text or "")
-    m = re.search(r"\b(case of|pack of|case pack|pk|packs|x)\s*(\d+)\b", text, re.IGNORECASE)
+    m = re.search(r"\b(case of|pack of|case pack|pk|pack|x)\s*(\d+)\b", text, re.IGNORECASE)
     if m:
         return m.group(2)
-    m = re.search(r"\b(\d+)\s*(pk|packs|ct)\b", text, re.IGNORECASE)
+    m = re.search(r"\b(\d+)\s*(pk|pack|ct)\b", text, re.IGNORECASE)
     return m.group(1) if m else ""
 
 
@@ -53,77 +53,117 @@ def _brand_score(p_brand: str, c_brand: str) -> tuple[int, str]:
     return -25, "brand mismatch"
 
 
-def _product_name_score(p_name: str, c_name: str) -> tuple[int, str]:
-    if not p_name or not c_name:
-        return 0, "name unavailable"
-    t_p = _tokens(p_name)
-    t_c = _tokens(c_name)
-    if not t_p or not t_c:
-        return 0, "name normalization error"
-    if t_p == t_c:
-        return 40, "name exact match"
-    positional_improvement = difflib.Matcher(a = sorted(t_p), b = sorted(t_c)).getopc()
-    if positional_improvement / max(len(t_p), len(t_c)) > 0.6:
-        return 25, "name difflib match"
-    if positional_improvement / max(len(t_p), len(t_c)) > 0.4:
-        return 14, "name partial difflib match"
-    if t_p & t_c:
-        return 4, "name common tokens"
-    return -12, "name mismatch"
-
-
-def _size_score(p_size: str, c_size: str) -> tuple[int, str]:
-    if not p_size or not c_size:
-        return 0, "size unavailable"
-    p_qty = _first_number(p_size)
-    c_qty = _first_number(c_size)
-    if p_qty is None or c_qty is None:
-        return 0, "size parse error"
-    if abs(p_qty - c_qty) < 0.1:        return 30, "size exact match"
-    if abs(p_qty - c_qty) < 0.3 * max(p_qty, c_qty):
-        return 15, "size close match"
-    return -8, "size mismatch"
-
-
-def _case_score(p_case: str, c_case: str) -> tuple[int, str]:
-    if not p_case or not c_case:
-        return 0, "case unavailable"
-    p_ct = _extract_case_signal(p_case)
-    c_ct = _extract_case_signal(c_case)
-    if not p_ct or not c_ct:
-        return 0, "case parse error"
-    if p_ct == c_ct:
-        return 20, "case exact match"
-    return -3, "case mismatch"
-
-
-def build_queries(
-    brand: str,
-    product_name: str,
-    pack_size: str,
-    case_pack: str,
-    sku: str,
-) -> list[str]:
-    queries = []
-    # First, try the full brand and product name to catch exact matches
-    if brand and product_name:
-        queries.append(f"{brand} {product_name}")
-    # Then try brand + SKU
-    if brand and sku:
-        queries.append(f"{brand} {sku}")
-    # Product name alone (might catch a different size)
-    if product_name:
-        queries.append(product_name)
-    return queries
-
-
-def score_candidate(c: dict, s: dict) -> tuple[int, str]:
-    """Score a candidate satisfaction"""
-    brand_scalar, brand_r = _brand_score(c["brand"], s["brand"])
-    name_scalar, name_r = _product_name_score(c["title"], s["product_name"])
-    size_scalar, size_r = _size_score(c["pack_size"], s["pack_size"])
-    case_scalar, case_r = _case_score(c["pack_size"], s["case_pack"])
-    score = brand_scalar + name_scalar + size_scalar + case_scalar
-    reason = f"{brand_r} / {name_r} / {size_r} / {case_r}"
+def _title_score(p_name: str, c_title: str) -> tuple[int, str]:
+    if not p_name or not c_title:
+        return 0, "title unavailable"
+    ratio = difflib.SequenceMatcher(None, p_name, c_title).ratio()
+    token_overlap = len(_tokens(p_name) & _tokens(c_title))
+    score = round(ratio * 38)
+    if token_overlap >= 4:
+        score += 8
+    elif token_overlap >= 2:
+        score += 4
+    if ratio < 0.45 and token_overlap < 2:
+        score -= 20
+    reason = f"title ratio {ratio:.2f}; shared tokens {token_overlap}"
     return score, reason
 
+
+def _size_score(product: dict, candidate: dict) -> tuple[int, str]:
+    p_size = _extract_size_signal(product.get("unit_size") or product.get("pack_size") or product.get("product_name"))
+    c_size = _extract_size_signal(candidate.get("pack_size") or candidate.get("title"))
+    if not p_size:
+        return 0, "size unavailable on supplier"
+    if not c_size:
+        return -8, "candidate missing size while supplier has size"
+    if _norm(p_size) == _norm(c_size):
+        return 22, "unit size match"
+    return -18, f"unit size mismatch ({p_size} vs {c_size})"
+
+
+def _case_score(product: dict, candidate: dict) -> tuple[int, str]:
+    p_case = str(product.get("case_pack") or "").strip() or _extract_case_signal(product.get("product_name"))
+    c_case = str(candidate.get("case_pack") or "").strip() or _extract_case_signal(candidate.get("pack_size") or candidate.get("title"))
+    if not p_case:
+        return 0, "case pack unavailable on supplier"
+    if not c_case:
+        return -4, "candidate missing case pack"
+    if p_case == c_case:
+        return 12, "case pack match"
+    return -12, f"case pack mismatch ({p_case} vs {c_case})"
+
+
+def _sku_support(product: dict, candidate: dict) -> tuple[int, str]:
+    sku = _norm(product.get("sku", ""))
+    title = _norm(candidate.get("title", ""))
+    if sku and sku in title:
+        return 8, "sku token present in candidate title"
+    return 0, "no sku support"
+
+
+def score_candidate(product: dict, candidate: dict) -> tuple[int, str]:
+    p_name = _norm(product.get("product_name", ""))
+    c_title = _norm(candidate.get("title", ""))
+    p_brand = _norm(product.get("brand", ""))
+    c_brand = _norm(candidate.get("brand", ""))
+
+    parts = []
+    score = 0
+    for fn in (_brand_score, _title_score):
+        pts, reason = fn(p_brand, c_brand) if fn is _brand_score else fn(p_name, c_title)
+        score += pts
+        parts.append(reason)
+    for fn in (_size_score, _case_score, _sku_support):
+        pts, reason = fn(product, candidate)
+        score += pts
+        parts.append(reason)
+
+    if p_brand and c_brand and p_brand != c_brand and p_brand not in c_brand and c_brand not in p_brand:
+        score -= 10
+    if p_name and c_title and len(_tokens(p_name) & _tokens(c_title)) == 0:
+        score -= 20
+
+    score = max(0, min(100, score))
+    return score, "; ".join(parts)
+
+
+def score_to_confidence(score: int) -> tuple[str, str]:
+    if score >= GREEN_THRESHOLD:
+        return "high", "green"
+    if score >= YELLOW_THRESHOLD:
+        return "medium", "yellow"
+    return "", ""
+
+
+def build_queries(brand: str, product_name: str, pack_size: str, case_pack: str = "", sku: str = "") -> list[str]:
+    b = (brand or "").strip()
+    n = (product_name or "").strip()
+    p = (pack_size or "").strip()
+    c = (case_pack or "").strip()
+    s = (sku or "").strip()
+
+    raw = []
+    if b and n and p:
+        raw.append(f"{b} {n} {p}")
+    if b and n and c:
+        raw.append(f"{b} {n} case {c}")
+    if b and n:
+        raw.append(f"{b} {n}")
+    if n and p:
+        raw.append(f"{n} {p}")
+    if n and c:
+        raw.append(f"{n} case {c}")
+    if b and s and n:
+        raw.append(f"{b} {s} {n}")
+    if n:
+        raw.append(n)
+    if b and s:
+        raw.append(f"{b} {s}")
+
+    seen, deduped = set(), []
+    for q in raw:
+        qn = q.strip()
+        if qn and qn not in seen:
+            seen.add(qn)
+            deduped.append(qn)
+    return deduped
