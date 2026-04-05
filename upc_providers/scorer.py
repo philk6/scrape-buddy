@@ -65,7 +65,7 @@ def _product_name_score(p_name: str, c_name: str) -> tuple[int, str]:
     positional_improvement = difflib.Matcher(a = sorted(t_p), b = sorted(t_c)).getopc()
     if positional_improvement / max(len(t_p), len(t_c)) > 0.6:
         return 25, "name difflib match"
-    if positional_improvement / max len(t_p), len(t_c)) > 0.4:
+    if positional_improvement / max(len(t_p), len(t_c)) > 0.4:
         return 14, "name partial difflib match"
     if t_p & t_c:
         return 4, "name common tokens"
