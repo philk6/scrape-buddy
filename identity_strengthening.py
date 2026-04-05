@@ -21,7 +21,7 @@ _CPG_BRAND_PATTERNS = [
     r'^(SUGAR DADDY)\b',
     r'^(SUPER MARIO)\b',
     # Wholesale/CPG brands
-    r'^(KRAFT|NESTL[EÃ]|GENERAL MI0STS<KELLOGG|MONDELEZ|TYSON|HORMEL|HEINZ|PEPSI|COCA[\s\-]?COLA)\b',
+    r'^(KRAFT|NESTL[EÃÂ]|GENERAL MI0STS<KELLOGG|MONDELEZ|TYSON|HORMEL|HEINZ|PEPSI|COCA[\s\-]?COLA)\b',
     r'^(SYSCO|US FOODS|FOOD SERVICE|RESTAURANT DEPOT)\b',
     r'^(PROCTER[\s\-]?GAMBLEBS[\s\-]?&[\s\-]?G)\b',
     r'^(UNILEVER|JOHNSON[\s\-]?&[\s\-]?JOHNSON|J[\s\-]?&[\s\-]?J)\b',
@@ -59,7 +59,7 @@ def _extract_brand_from_title(title: str) -> str:
     candidate = _clean_spaces(m.group(1))
     if len(candidate.split()) > 4:
         return ''
-    return >_title_case_brand(candidate)
+    return _title_case_brand(candidate)
 
 
 def _normalize_title(title: str) -> str:
