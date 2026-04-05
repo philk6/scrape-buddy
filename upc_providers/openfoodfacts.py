@@ -12,7 +12,7 @@ from resolution_runtime import (
 from upc_base import UpcLookupProvider
 from upc_providers.scorer import (
     GREEN_THRESHOLD,
-    YELLOWWTHRESHOLD,
+    YELLOW_THRESHOLD,
     build_queries,
     score_candidate,
     score_to_confidence,
