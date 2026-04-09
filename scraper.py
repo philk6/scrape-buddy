@@ -154,14 +154,31 @@ def fetch_html_playwright(url: str, wait_ms: int = 3000, strict: bool = False) -
 
             # Second wait: if the page had KnockoutJS or Angular bindings,
             # the initial selectors may fire on empty templates before data
-            # arrives. Wait for actual price text to appear in the DOM.
+            # arrives. Wait for actual product content to appear in the DOM.
+            # Check for prices OR product names/images (some sites hide
+            # prices behind login but still render product data).
             try:
                 page.wait_for_function(
-                    "() => document.body.innerText.match(/\\$\\d+\\.\\d{2}/)",
+                    """() => {
+                        // Price text rendered
+                        if (document.body.innerText.match(/\\$\\d+\\.\\d{2}/)) return true;
+                        // 3+ product images rendered
+                        if (document.querySelectorAll('img[src*="product"], img[src*="item"], [class*="product"] img').length >= 3) return true;
+                        // 3+ product name elements rendered
+                        if (document.querySelectorAll('[class*="product-name"], [class*="product-title"], [class*="item-name"], [data-bind*="text"]').length >= 3) return true;
+                        // 3+ data-bind elements with visible text (KnockoutJS finished)
+                        var bound = document.querySelectorAll('[data-bind]');
+                        var withText = 0;
+                        for (var i = 0; i < bound.length && i < 50; i++) {
+                            if (bound[i].textContent.trim().length > 5) withText++;
+                            if (withText >= 3) return true;
+                        }
+                        return false;
+                    }""",
                     timeout=wait_ms,
                 )
             except Exception:
-                pass  # Not all pages have prices — don't block on this
+                pass  # Not all pages match — don't block on this
 
             html = page.content()
             browser.close()

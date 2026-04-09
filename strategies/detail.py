@@ -948,6 +948,79 @@ def _extract_upc(soup: BeautifulSoup) -> str:
     return ""
 
 
+def _extract_from_script_json(soup: BeautifulSoup, field_names: list[str]) -> str:
+    """
+    Search all <script> tags for embedded JSON or JS object literals containing
+    any of the given field names.  Returns the first non-empty string value
+    found, or "".
+
+    Handles:
+      - Valid JSON blobs:  {"upc": "012345678901"}
+      - JS object literals with unquoted keys:  BMupc: "012345678901"
+        (common on KnockoutJS / view-model sites like Betty Mills)
+    """
+    # Build a case-insensitive lookup: lowered name -> original names
+    # e.g. field_names=["upc","gtin12"] also matches "BMupc","bmGtin12"
+    lower_names = {n.lower(): n for n in field_names}
+
+    for script in soup.find_all("script"):
+        text = script.string
+        if not text:
+            continue
+
+        # ── Pass 1: JS key-value pairs — key: "value" (unquoted keys) ────
+        # Catches KnockoutJS view-model data like  BMupc: "00044600314303"
+        for m in re.finditer(r'(\w+)\s*:\s*"([^"]*?)"', text):
+            raw_key = m.group(1)
+            # Strip common prefixes (BM, bm, vm, VM) then compare lowercase
+            stripped_key = re.sub(r'^(?:BM|bm|vm|VM)', '', raw_key)
+            if stripped_key.lower() in lower_names:
+                val = m.group(2).strip()
+                if val:
+                    logger.debug(
+                        f"[Detail] script-JS hit: {raw_key}={val!r}"
+                    )
+                    return val
+
+        # ── Pass 2: valid JSON blobs ─────────────────────────────────────
+        for m in re.finditer(r"\{[^{}]{10,}\}", text):
+            try:
+                obj = json.loads(m.group(0))
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if not isinstance(obj, dict):
+                continue
+            for key in field_names:
+                val = str(obj.get(key) or "").strip()
+                if val:
+                    logger.debug(
+                        f"[Detail] script-JSON hit: {key}={val!r}"
+                    )
+                    return val
+
+        # ── Pass 3: top-level JSON object/array ──────────────────────────
+        stripped = text.strip()
+        if stripped.startswith(("{", "[")):
+            try:
+                parsed = json.loads(stripped)
+                items = [parsed] if isinstance(parsed, dict) else (
+                    parsed if isinstance(parsed, list) else []
+                )
+                for obj in items:
+                    if not isinstance(obj, dict):
+                        continue
+                    for key in field_names:
+                        val = str(obj.get(key) or "").strip()
+                        if val:
+                            logger.debug(
+                                f"[Detail] script-JSON hit: {key}={val!r}"
+                            )
+                            return val
+            except (json.JSONDecodeError, ValueError):
+                pass
+    return ""
+
+
 def _find_label_value(soup: BeautifulSoup, label_keywords: list) -> str:
     """
     Scan for a label→value pattern in product spec tables/definition lists.
@@ -1193,6 +1266,15 @@ def _extract_from_detail_page(html: str, url: str) -> dict:
         if not upc:
             upc = _extract_upc(soup)
 
+        # 4. Script-tag JSON fallback (KnockoutJS / embedded view-model data)
+        if not upc:
+            raw = _extract_from_script_json(
+                soup, ["upc", "gtin", "gtin12", "gtin13", "ean"]
+            )
+            upc = _coerce_upc(raw)
+            if upc:
+                logger.info(f"[Strategy 2] UPC via script-JSON | upc={upc}")
+
         if upc:
             extracted["upc"] = True
     except Exception:
@@ -1227,6 +1309,16 @@ def _extract_from_detail_page(html: str, url: str) -> dict:
                 candidate = price_el.get_text(" ", strip=True)
                 m = re.search(r"\$\d[\d,]*\.\d{2}", candidate)
                 price = m.group(0) if m else ""
+
+        # Script-tag JSON fallback (KnockoutJS / embedded view-model data)
+        if not price:
+            raw_price = _extract_from_script_json(
+                soup, ["price", "salePrice", "sale_price", "unitPrice"]
+            )
+            if raw_price:
+                price = _normalize_money_value(raw_price) or raw_price.strip()
+                if price:
+                    logger.info(f"[Detail] price via script-JSON | price={price!r}")
 
         price = _normalize_money_value(price) or price.strip()
         compare_unit_price = locals().get('nassau_unit_price', '') or locals().get('unit_price', '') if 'unit_price' in locals() else locals().get('nassau_unit_price', '')
@@ -1265,6 +1357,15 @@ def _extract_from_detail_page(html: str, url: str) -> dict:
         case_pack = _find_label_value(soup, _CASE_PACK_LABELS)
         if not case_pack:
             case_pack = _extract_nassau_sales_per_case(soup)
+        # Script-tag JSON fallback (KnockoutJS / embedded view-model data)
+        if not case_pack:
+            raw_cp = _extract_from_script_json(
+                soup, ["casePack", "case_pack", "caseQty", "case_qty",
+                       "unitsPerCase", "units_per_case"]
+            )
+            if raw_cp:
+                case_pack = raw_cp
+                logger.info(f"[Detail] case_pack via script-JSON | case_pack={case_pack!r}")
         if case_pack:
             extracted["case_pack"] = True
             logger.info(f"[Detail] case_pack={case_pack!r}")

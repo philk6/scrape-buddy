@@ -232,23 +232,50 @@ def _count_catalog_rows(soup: BeautifulSoup) -> int:
     return product_rows
 
 
-def _has_login_form(soup: BeautifulSoup) -> bool:
-    """Return True if the page appears to require login."""
-    # Check for password input field (strongest signal)
-    if soup.find("input", {"type": "password"}):
-        return True
+def _is_inside_nav_chrome(el) -> bool:
+    """Return True if the element is nested inside site chrome rather than
+    the primary page content.
 
-    # Check form action or surrounding text
+    Detects: <header>, <nav>, <aside> tags, and modal/dropdown overlays
+    (Bootstrap .modal, generic overlay/popup/dropdown class patterns).
+    """
+    _NAV_CHROME_TAGS = frozenset(["header", "nav", "aside"])
+    _OVERLAY_CLASS_SIGNALS = ["modal", "dropdown", "popup", "overlay", "popover"]
+    parent = el.parent
+    while parent is not None and getattr(parent, "name", None) not in (None, "[document]"):
+        if parent.name in _NAV_CHROME_TAGS:
+            return True
+        classes = " ".join(parent.get("class") or []).lower()
+        if any(sig in classes for sig in _OVERLAY_CLASS_SIGNALS):
+            return True
+        parent = parent.parent
+    return False
+
+
+def _has_login_form(soup: BeautifulSoup) -> bool:
+    """Return True if the page appears to require login.
+
+    Only triggers when the login form is the primary page content, not a
+    header/nav/aside login widget (common on e-commerce sites).
+    """
+    # Check for password inputs that are NOT inside nav chrome
+    for pw in soup.find_all("input", {"type": "password"}):
+        if not _is_inside_nav_chrome(pw):
+            return True
+
+    # Check form action or surrounding text — only outside nav chrome
     for form in soup.find_all("form"):
         action = (form.get("action") or "").lower()
         if any(sig in action for sig in ["login", "sign-in", "signin", "auth"]):
-            return True
+            if not _is_inside_nav_chrome(form):
+                return True
 
     # Check page-level class/id signals
     for el in soup.find_all(True):
         combined = " ".join(el.get("class") or []).lower() + " " + (el.get("id") or "").lower()
         if any(sig in combined for sig in ["login-form", "signin-form", "auth-form", "login-page"]):
-            return True
+            if not _is_inside_nav_chrome(el):
+                return True
 
     return False
 

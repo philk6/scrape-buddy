@@ -39,33 +39,48 @@ def _static_html_has_product_content(html: str) -> bool:
     """
     Quick heuristic: does the static HTML contain actual product data?
 
-    Returns True if the page has price-like text ($X.XX) outside of <script>
-    tags. Returns False if the page is a JS shell — templates exist but no
-    rendered product data (prices, SKUs) is present.
-
-    This is the key signal for deciding whether to escalate to Playwright:
-    a page might have thousands of chars of navigation chrome but zero
-    product content if all products are rendered by JavaScript.
+    Returns True if the page has prices, SKUs, or repeated product elements
+    (names/images) outside of <script> tags. Some sites hide prices behind
+    login but still render product names and images for logged-out users.
     """
-    # Strip <script> and <style> content so we don't match JS template literals
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
     visible_text = soup.get_text(separator=" ")
 
-    # Check for price patterns — the most reliable signal that product data
-    # has been rendered into the DOM (not just templated)
-    has_prices = bool(re.search(r"\$\d+\.\d{2}", visible_text))
-    if has_prices:
+    # Check for price patterns — strongest signal
+    if re.search(r"\$\d+\.\d{2}", visible_text):
         return True
 
-    # Check for SKU patterns as a secondary signal
-    has_skus = bool(re.search(
+    # Check for SKU patterns
+    if re.search(
         r"\b(?:SKU|Item\s*#|Part\s*#|UPC)\s*[:\s]?\s*[A-Z0-9]{3,}",
         visible_text, re.IGNORECASE
-    ))
-    return has_skus
+    ):
+        return True
+
+    # Check for repeated product elements (names or images) — catches sites
+    # that hide prices behind login but still render product cards
+    product_name_els = soup.find_all(
+        lambda el: el.name not in ("script", "style") and el.get("class")
+        and any(sig in " ".join(el.get("class")).lower()
+                for sig in ("product-name", "product-title", "item-name",
+                            "item-title", "product-description"))
+    )
+    if len(product_name_els) >= 3:
+        return True
+
+    product_imgs = soup.find_all("img", src=True)
+    product_img_count = sum(
+        1 for img in product_imgs
+        if any(sig in (img.get("src") or "").lower()
+               for sig in ("product", "item", "catalog"))
+    )
+    if product_img_count >= 3:
+        return True
+
+    return False
 
 # Strategy 1 is considered successful if it returns at least this many products
 STRATEGY_1_MIN_RESULTS = 3
