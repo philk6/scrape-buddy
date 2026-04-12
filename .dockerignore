@@ -1,0 +1,15 @@
+.env
+*.db
+*.db-journal
+*.log
+__pycache__/
+cache/
+sessions/
+tools/
+_*.py
+.git/
+.gitignore
+.dockerignore
+app.log
+*.bat
+README.md
