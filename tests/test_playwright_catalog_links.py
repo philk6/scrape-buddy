@@ -16,11 +16,18 @@ class PlaywrightCatalogLinkTests(unittest.TestCase):
         self.assertTrue(_looks_like_product_detail_url("https://example.com/products/widget"))
         self.assertTrue(_looks_like_product_detail_url("https://example.com/item/ABC123"))
         self.assertTrue(_looks_like_product_detail_url("https://example.com/p/ABC123"))
+        self.assertTrue(
+            _looks_like_product_detail_url(
+                "https://example.com/scotch-box-lock-shipping-packaging-tape-mmm1956"
+            )
+        )
 
     def test_rejects_category_and_search_routes(self):
         self.assertFalse(_looks_like_product_detail_url("https://example.com/category/syrup"))
         self.assertFalse(_looks_like_product_detail_url("https://example.com/search?q=syrup"))
         self.assertFalse(_looks_like_product_detail_url("https://example.com/collections/syrup"))
+        self.assertFalse(_looks_like_product_detail_url("https://example.com/basket/view"))
+        self.assertFalse(_looks_like_product_detail_url("https://cdn.example.com/product-image-123.jpg"))
 
     def test_collected_product_links_outrank_weak_listing_rows(self):
         links = [
@@ -72,6 +79,17 @@ class PlaywrightCatalogLinkTests(unittest.TestCase):
         self.assertEqual(product["identifier_type"], "ean13")
         self.assertEqual(product["price"], "$12.99")
         self.assertEqual(product["product_url"], "https://example.com/product/123")
+
+    def test_api_object_to_product_rejects_media_only_objects(self):
+        product = _api_object_to_product(
+            {
+                "name": "promo image",
+                "url": "https://cdn.example.com/promo-123.png",
+            },
+            "https://example.com/catalog",
+        )
+
+        self.assertEqual(product, {})
 
     def test_walk_api_payload_finds_nested_product_objects_and_urls(self):
         products = []

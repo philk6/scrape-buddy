@@ -45,7 +45,7 @@ import json
 import os
 import re
 from bs4 import BeautifulSoup
-from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlparse, urlunparse
 
 from scraper import HEADERS, _DYNAMIC_EXPANSION_SELECTORS, _expand_dynamic_catalog, extract_products
 from strategies.detail import (
@@ -215,6 +215,20 @@ _BAD_SKU_RE = re.compile(
 _API_URL_HINTS = (
     "api", "graphql", "search", "catalog", "category", "product", "products",
     "items", "browse", "listing", "facets",
+)
+
+_MEDIA_PATH_RE = re.compile(
+    r"\.(?:avif|bmp|css|gif|ico|jpe?g|js|pdf|png|svg|webp)(?:$|[?#])",
+    re.IGNORECASE,
+)
+
+_NON_PRODUCT_URL_FRAGMENTS = (
+    "/about", "/account", "/basket", "/blog", "/cart", "/category",
+    "/categories", "/checkout", "/collection", "/collections", "/contact",
+    "/customer", "/faq", "/help", "/login", "/logout", "/my-account",
+    "/policy", "/privacy", "/profile", "/register", "/rewards", "/search",
+    "/signin", "/signup", "/terms", "/users", "/wishlist",
+    "?product_list", "filter=", "javascript:",
 )
 
 _PRODUCT_OBJECT_KEYS = {
@@ -719,6 +733,8 @@ def _api_object_to_product(obj: dict, base_url: str) -> dict:
     )
     if product_url:
         product_url = urljoin(base_url, product_url)
+        if not _looks_like_product_detail_url(product_url):
+            product_url = ""
     image_url = _lookup_any(
         obj,
         ("image_url", "imageUrl", "image", "thumbnail", "thumbnailUrl", "src"),
@@ -739,7 +755,10 @@ def _api_object_to_product(obj: dict, base_url: str) -> dict:
         "image_url": image_url,
         "product_url": product_url,
     }
-    if not (product["product_name"] or product["product_url"] or product["sku"]):
+    if not (
+        product["product_name"]
+        and (product["product_url"] or product["sku"] or product["upc"] or product["price"] or product["image_url"])
+    ):
         return {}
     return normalize_product(product)
 
@@ -1506,9 +1525,9 @@ def _looks_like_product_detail_url(url: str) -> bool:
     url = (url or "").strip().lower()
     if not url:
         return False
-    if any(token in url for token in ["/customer/", "/search", "?product_list", "javascript:"]):
+    if _MEDIA_PATH_RE.search(url):
         return False
-    if any(token in url for token in ["/g/", "/collections/", "/category", "/categories/", "filter="]):
+    if any(token in url for token in _NON_PRODUCT_URL_FRAGMENTS):
         return False
     if any(token in url for token in (
         "/products/", "/product/", "/item/", "/p/", "/pd/", "/dp/",
@@ -1517,7 +1536,16 @@ def _looks_like_product_detail_url(url: str) -> bool:
     )):
         return True
     if not url.endswith('.html'):
-        return False
+        path = unquote(urlparse(url).path or "").strip("/")
+        if not path or "/" in path:
+            return False
+        slug = path.lower()
+        if len(slug) < 12 or "-" not in slug:
+            return False
+        # Many supplier product pages are shallow extensionless slugs with
+        # model/SKU digits near the end. Category slugs are usually shorter and
+        # lack this product-code shape.
+        return bool(re.search(r"[a-z][a-z0-9-]*\d[a-z0-9-]*$", slug))
 
     # Category-like .html URLs can still appear in listing cards. Real product
     # detail pages are usually shallow slugs, while category-like pages contain
@@ -2103,6 +2131,14 @@ def _run_inner(page, listing_url: str) -> list:
             )
 
         enrich_links = detail_link_pool
+
+        if total_products and len(enrich_links) > total_products:
+            logger.info(
+                f"[Strategy 3] Detail enrichment candidate pool "
+                f"({len(enrich_links)}) exceeds visible product count "
+                f"({total_products}); capping to first {total_products} link(s)"
+            )
+            enrich_links = enrich_links[:total_products]
 
         if len(enrich_links) > AUTH_DETAIL_ENRICH_LIMIT:
             logger.info(

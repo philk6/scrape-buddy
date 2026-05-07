@@ -22,6 +22,31 @@ BARCODE_FIELDS = (
     "barcode_raw",
 )
 
+NON_PRODUCT_NAME_PATTERNS = (
+    r"\byour shopping cart\b",
+    r"\bshopping cart\b",
+    r"\bsign\s*in\b",
+    r"\blog\s*in\b",
+    r"\bjavascript is disabled\b",
+    r"\bsearch instead\b",
+    r"^\s*showing results for",
+    r"^\s*\d[\d,]*\s+(?:results?|items?|products?)\s+for\b",
+)
+
+NON_PRODUCT_URL_PATTERNS = (
+    r"/basket",
+    r"/cart",
+    r"/checkout",
+    r"/account",
+    r"/myaccount",
+    r"/users/",
+    r"/login",
+    r"/register",
+    r"/signin",
+    r"/signup",
+    r"/wishlist",
+)
+
 
 def classify_scrape_error(error: object) -> str:
     """Return a stable category for a scrape failure."""
@@ -194,23 +219,30 @@ def build_quality_report(
     if total == 0:
         warnings.append("No products were extracted.")
     else:
-        aggregate_names = sum(
+        non_product_rows = sum(
             1
             for p in rows
-            if re.search(
-                r"^\s*\d[\d,]*\s+(?:results?|items?|products?)\s+for\b",
-                str(p.get("product_name") or ""),
-                re.IGNORECASE,
+            if (
+                any(
+                    re.search(pattern, str(p.get("product_name") or ""), re.IGNORECASE)
+                    for pattern in NON_PRODUCT_NAME_PATTERNS
+                )
+                or any(
+                    re.search(pattern, str(p.get("product_url") or ""), re.IGNORECASE)
+                    for pattern in NON_PRODUCT_URL_PATTERNS
+                )
             )
         )
-        if aggregate_names:
-            warnings.append("Some extracted rows look like search/category summaries, not products.")
+        if non_product_rows:
+            warnings.append(f"{non_product_rows} extracted row(s) look like navigation, account, cart, or search/category summaries.")
         if total < 3:
             warnings.append("Very few products were extracted; this may be a detail page, search shell, or incomplete catalog crawl.")
         if counts["name"] / total < 0.70:
             warnings.append("Low product-name coverage; card/row detection may be wrong.")
         if counts["product_url"] / total < 0.30:
             warnings.append("Few product detail URLs were found; detail enrichment may be limited.")
+        if counts["price"] == 0 and counts["sku"] == 0 and counts["barcode"] == 0:
+            warnings.append("No price, SKU, or UPC/EAN/GTIN fields were captured; extracted rows are likely not real products or require a browser/login session.")
         if counts["barcode"] / total < 0.20:
             warnings.append("Low UPC/EAN/GTIN coverage; identifiers may live on detail pages or behind login.")
 
@@ -247,7 +279,11 @@ def build_quality_report(
         score = 0.0
     else:
         for warning in warnings:
-            if warning.startswith("Stop reason"):
+            if "navigation, account, cart" in warning:
+                score -= 0.35
+            elif warning.startswith("No price, SKU"):
+                score -= 0.35
+            elif warning.startswith("Stop reason"):
                 score -= 0.10
             elif "UPC" in warning:
                 score -= 0.15

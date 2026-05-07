@@ -59,6 +59,29 @@ class ProductQualityTests(unittest.TestCase):
         self.assertTrue(any("summaries" in w for w in report["warnings"]))
         self.assertLess(report["score"], 0.8)
 
+    def test_quality_report_penalizes_navigation_rows(self):
+        report = build_quality_report(
+            [
+                {
+                    "product_name": "Your Shopping Cart",
+                    "product_url": "https://example.com/basket/view",
+                },
+                {
+                    "product_name": "Betty Mills Sign In",
+                    "product_url": "https://example.com/users/myaccount",
+                },
+                {
+                    "product_name": "JavaScript is disabled",
+                    "product_url": "https://example.com/category/widgets",
+                },
+            ],
+            strategy_name="fixture",
+        )
+
+        self.assertTrue(any("navigation" in w for w in report["warnings"]))
+        self.assertTrue(any("No price, SKU" in w for w in report["warnings"]))
+        self.assertLess(report["score"], 0.5)
+
     def test_quality_report_flags_incomplete_catalog_coverage(self):
         report = build_quality_report(
             [{"product_name": f"Product {i}", "upc": "012345678905"} for i in range(20)],

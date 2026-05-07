@@ -286,6 +286,27 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
                 )
 
         if result is None:
+            if use_playwright and _html_needs_browser_crawler(html):
+                diagnostics = _build_product_diagnostics(
+                    [],
+                    playwright_catalog.NAME,
+                    browser_crawl_attempt,
+                )
+                diagnostics.setdefault("warnings", []).append(
+                    "Browser crawler found no products, and the static HTML looked blocked or JavaScript-rendered; skipped static fallback to avoid navigation rows."
+                )
+                database.complete_run(
+                    run_id=run_id,
+                    strategy_id=playwright_catalog.ID,
+                    strategy_name=playwright_catalog.NAME,
+                    products=[],
+                    diagnostics=diagnostics,
+                )
+                logging.info(
+                    f"[Job {run_id}] Completed with no products after browser "
+                    "crawler attempt; skipped blocked/JS static fallback"
+                )
+                return
             if not html:
                 diagnostics = _build_product_diagnostics(
                     [],
