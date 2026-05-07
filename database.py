@@ -21,15 +21,36 @@ save_scrape() + _row_to_product() below — no other files need to change.
 
 import sqlite3
 import os
+import json
 from datetime import datetime, timezone
 
 # Database file lives in the same directory as this module
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scrape_history.db")
 
 
+class ClosingConnection(sqlite3.Connection):
+    """SQLite connection that closes after context-manager commit/rollback."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
+def _decode_diagnostics(value: str | None) -> dict:
+    if not value:
+        return {}
+    try:
+        decoded = json.loads(value)
+        return decoded if isinstance(decoded, dict) else {}
+    except Exception:
+        return {}
+
+
 def get_connection() -> sqlite3.Connection:
     """Open (or create) the SQLite database and return a connection."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, factory=ClosingConnection)
     conn.row_factory = sqlite3.Row          # rows accessible as dicts
     conn.execute("PRAGMA foreign_keys = ON")  # enforce ON DELETE CASCADE
     return conn
@@ -60,11 +81,16 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         ("scrape_items", "minimum_order_qty",  "TEXT DEFAULT ''"),
         ("scrape_items", "raw_price_text",     "TEXT DEFAULT ''"),
         ("scrape_items", "gtin_case",          "TEXT DEFAULT ''"),
+        ("scrape_items", "ean",                "TEXT DEFAULT ''"),
+        ("scrape_items", "gtin",               "TEXT DEFAULT ''"),
+        ("scrape_items", "barcode_raw",        "TEXT DEFAULT ''"),
+        ("scrape_items", "identifier_type",    "TEXT DEFAULT ''"),
         # scrape_runs — job lifecycle columns (DEFAULT 'completed' keeps old rows valid)
         ("scrape_runs",  "status",        "TEXT DEFAULT 'completed'"),
         ("scrape_runs",  "started_at",    "TEXT DEFAULT ''"),
         ("scrape_runs",  "finished_at",   "TEXT DEFAULT ''"),
         ("scrape_runs",  "error_message", "TEXT DEFAULT ''"),
+        ("scrape_runs",  "diagnostics_json", "TEXT DEFAULT ''"),
     ]
     for table, column, typedef in new_columns:
         try:
@@ -144,8 +170,9 @@ def save_scrape(
                 upc_confidence_color, upc_match_reason,
                 raw_pack_text, unit_measure, pack_confidence,
                 unit_size, unit_price, pricing_unit,
-                bulk_price, minimum_order_qty, raw_price_text, gtin_case)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                bulk_price, minimum_order_qty, raw_price_text, gtin_case,
+                ean, gtin, barcode_raw, identifier_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 (
                     run_id,
@@ -174,6 +201,10 @@ def save_scrape(
                     p.get("minimum_order_qty", ""),
                     p.get("raw_price_text", ""),
                     p.get("gtin_case", ""),
+                    p.get("ean", ""),
+                    p.get("gtin", ""),
+                    p.get("barcode_raw", ""),
+                    p.get("identifier_type", ""),
                 )
                 for p in products
             ],
@@ -224,6 +255,7 @@ def complete_run(
     strategy_id:   int,
     strategy_name: str,
     products:      list,
+    diagnostics:   dict | None = None,
 ) -> None:
     """
     Mark a run as completed and bulk-insert its products.
@@ -235,9 +267,16 @@ def complete_run(
             conn.execute(
                 """UPDATE scrape_runs
                    SET status='completed', finished_at=?, strategy_id=?,
-                       strategy_name=?, product_count=?
+                       strategy_name=?, product_count=?, diagnostics_json=?
                    WHERE id=?""",
-                (finished_at, strategy_id, strategy_name, len(products), run_id),
+                (
+                    finished_at,
+                    strategy_id,
+                    strategy_name,
+                    len(products),
+                    json.dumps(diagnostics or {}, ensure_ascii=False),
+                    run_id,
+                ),
             )
             conn.executemany(
                 """INSERT INTO scrape_items
@@ -247,8 +286,9 @@ def complete_run(
                     upc_confidence_color, upc_match_reason,
                     raw_pack_text, unit_measure, pack_confidence,
                     unit_size, unit_price, pricing_unit,
-                    bulk_price, minimum_order_qty, raw_price_text, gtin_case)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    bulk_price, minimum_order_qty, raw_price_text, gtin_case,
+                    ean, gtin, barcode_raw, identifier_type)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (
                         run_id,
@@ -277,6 +317,10 @@ def complete_run(
                         p.get("minimum_order_qty", ""),
                         p.get("raw_price_text", ""),
                         p.get("gtin_case", ""),
+                        p.get("ean", ""),
+                        p.get("gtin", ""),
+                        p.get("barcode_raw", ""),
+                        p.get("identifier_type", ""),
                     )
                     for p in products
                 ],
@@ -288,15 +332,20 @@ def complete_run(
         )
 
 
-def fail_run(run_id: int, error_message: str) -> None:
+def fail_run(run_id: int, error_message: str, diagnostics: dict | None = None) -> None:
     """Mark a run as failed with an error message."""
     finished_at = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
         conn.execute(
             """UPDATE scrape_runs
-               SET status='failed', finished_at=?, error_message=?
+               SET status='failed', finished_at=?, error_message=?, diagnostics_json=?
                WHERE id=?""",
-            (finished_at, str(error_message)[:500], run_id),
+            (
+                finished_at,
+                str(error_message)[:500],
+                json.dumps(diagnostics or {}, ensure_ascii=False),
+                run_id,
+            ),
         )
 
 
@@ -310,11 +359,16 @@ def get_history() -> list:
     with get_connection() as conn:
         rows = conn.execute(
             """SELECT id, label, source_url, timestamp, strategy_name, product_count,
-                      status, error_message
+                      status, error_message, diagnostics_json
                FROM scrape_runs
                ORDER BY id DESC"""
         ).fetchall()
-    return [dict(r) for r in rows]
+    history = []
+    for row in rows:
+        item = dict(row)
+        item["diagnostics"] = _decode_diagnostics(item.get("diagnostics_json"))
+        history.append(item)
+    return history
 
 
 def get_run(run_id: int) -> dict | None:
@@ -337,12 +391,16 @@ def get_run(run_id: int) -> dict | None:
                       upc_confidence_color, upc_match_reason,
                       raw_pack_text, unit_measure, pack_confidence,
                       unit_size, unit_price, pricing_unit,
-                      bulk_price, minimum_order_qty, raw_price_text, gtin_case
+                      bulk_price, minimum_order_qty, raw_price_text, gtin_case,
+                      ean, gtin, barcode_raw, identifier_type
                FROM scrape_items WHERE run_id = ? ORDER BY id""",
             (run_id,),
         ).fetchall()
 
+    run_dict = dict(run)
+    run_dict["diagnostics"] = _decode_diagnostics(run_dict.get("diagnostics_json"))
+
     return {
-        **dict(run),
+        **run_dict,
         "products": [dict(i) for i in items],
     }

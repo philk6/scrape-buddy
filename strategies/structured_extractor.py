@@ -55,8 +55,10 @@ def _extract_from_jsonld_item(item: dict, base_url: str) -> dict | None:
     product["upc"] = (
         item.get("gtin12", "")
         or item.get("gtin13", "")
+        or item.get("gtin8", "")
         or item.get("gtin", "")
         or item.get("gtin14", "")
+        or item.get("productID", "")
         or ""
     )
 
@@ -132,6 +134,14 @@ def _extract_jsonld(html: str, url: str) -> list[dict]:
                 p = _extract_from_jsonld_item(item, url)
                 if p:
                     products.append(p)
+            elif "itemListElement" in item and isinstance(item["itemListElement"], list):
+                for child in item["itemListElement"]:
+                    if isinstance(child, dict) and "item" in child:
+                        child = child["item"]
+                    if isinstance(child, dict) and _is_product_type(child):
+                        p = _extract_from_jsonld_item(child, url)
+                        if p:
+                            products.append(p)
             elif "item" in item:
                 inner = item["item"]
                 if isinstance(inner, dict) and _is_product_type(inner):
@@ -196,7 +206,7 @@ def _extract_microdata(html: str, url: str) -> list[dict]:
                     break
 
         # UPC/GTIN
-        for prop in ["gtin12", "gtin13", "gtin", "gtin14"]:
+        for prop in ["gtin12", "gtin13", "gtin8", "gtin", "gtin14", "productID"]:
             el = scope.find(attrs={"itemprop": prop})
             if el:
                 val = (el.get("content", "") or el.get_text(strip=True)).strip()
@@ -304,7 +314,7 @@ def _extract_opengraph(html: str, url: str) -> list[dict]:
 
     if og_price:
         product["price"] = (
-            f"${og_price}" if og_currency == "USD" else f"{(g_price} {og_currency}"
+            f"${og_price}" if og_currency == "USD" else f"{og_price} {og_currency}"
         )
 
     return [product]

@@ -1187,7 +1187,7 @@
             if (run.status === "completed") {
               await loadRun(run.id);
             } else {
-              setStatus(`Scrape failed: ${run.error_message || "Unknown error."}`, "error");
+              setStatus(`Scrape failed: ${failureMessage(run)}`, "error");
               document.getElementById("resultsWrapper").style.display = "none";
             }
           }
@@ -1275,7 +1275,7 @@
       }
 
       if (run.status === "failed") {
-        setStatus(`Scrape failed: ${run.error_message || "Unknown error."}`, "error");
+        setStatus(`Scrape failed: ${failureMessage(run)}`, "error");
         document.getElementById("resultsWrapper").style.display = "none";
         return;
       }
@@ -1536,6 +1536,8 @@
       return;
     }
 
+    const diag = getDiagnostics(run);
+    const warnings = Array.isArray(diag.warnings) ? diag.warnings : [];
     const diagnostics = [
       ['Supplier', safeDomain(run.source_url || '') || '—'],
       ['Strategy', run.strategy_name || '—'],
@@ -1544,6 +1546,12 @@
       ['Rows', String(run.product_count ?? (run.products || []).length ?? 0)],
       ['Quality', calcHistoryQuality(run) || '—'],
     ];
+    if (typeof diag.score === 'number') {
+      diagnostics.push(['Quality Score', `${Math.round(diag.score * 100)}%`]);
+    }
+    if (warnings.length) {
+      diagnostics.push(['Warnings', warnings.slice(0, 3).join(' | ')]);
+    }
 
     list.innerHTML = diagnostics.map(([label, value]) =>
       `<div class="diagnostics-item"><strong>${escHtml(label)}:</strong> ${escHtml(value)}</div>`
@@ -1551,12 +1559,35 @@
     panel.classList.add('show');
   }
 
+  function getDiagnostics(run) {
+    if (!run) return {};
+    if (run.diagnostics && typeof run.diagnostics === 'object') return run.diagnostics;
+    if (run.diagnostics_json) {
+      try {
+        const parsed = JSON.parse(run.diagnostics_json);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  }
+
   function safeDomain(url) {
     try { return new URL(url).hostname.replace(/^www\./, ''); }
     catch { return ''; }
   }
 
+  function failureMessage(run) {
+    const diag = getDiagnostics(run);
+    const category = diag.error_category ? `${diag.error_category}: ` : "";
+    const warning = Array.isArray(diag.warnings) && diag.warnings.length ? ` ${diag.warnings[0]}` : "";
+    return `${category}${run?.error_message || diag.error_message || "Unknown error."}${warning}`.trim();
+  }
+
   function calcHistoryQuality(run) {
+    const diag = getDiagnostics(run);
+    if (typeof diag.score === 'number') return `${Math.round(diag.score * 100)}% quality`;
     const products = run.products || [];
     const total = run.product_count || products.length || 0;
     if (!total) return '';

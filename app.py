@@ -43,6 +43,7 @@ from scraper import fetch_html, debug_scrape, make_auth_fetch_fn
 from strategies import run_best_strategy
 from strategies.detail import run as detail_run
 from strategies import playwright_catalog
+from strategies.product_quality import build_error_report, build_quality_report, normalize_products
 from upc_providers import default_providers
 from pack_parser import enrich_all as enrich_all_pack
 
@@ -70,12 +71,12 @@ if os.environ.get("OPENAI_API_KEY"):
 CHAT_SYSTEM_PROMPT = """You are a helpful support assistant for The Syndicate Amazon Mastery UPC Scraper.
 
 This tool lets users paste a supplier category page URL and scrape product data from it.
-It works by detecting /products/ links on the listing page and visiting each product detail page.
-It extracts: product_name, brand, sku, upc, price, pack_size, case_pack, image_url, product_url.
+It uses layered extraction: structured data, row/table catalogs, generic product cards, detail-page enrichment, LLM fallback, JavaScript rendering, and pagination traversal.
+It extracts: product_name, brand, sku, upc/ean/gtin, price, pack_size, case_pack, image_url, product_url, and quality diagnostics.
 
 Key behaviours:
-- Strongly prefers /products/ URLs; rejects /collections/ and navigation links.
-- Uses a two-pass approach: context-aware link collection first, URL-only fallback if needed.
+- Uses universal product-data signals first instead of supplier-specific patches.
+- Follows pagination and detail links when available.
 - Saves every scrape to a local SQLite database with a label and timestamp.
 - Results can be exported to .xlsx from the results header or the History sidebar.
 
@@ -117,6 +118,7 @@ PRODUCT_FIELDS = [
     "unit_size", "unit_price", "pricing_unit",
     # Multi-supplier extraction fields
     "bulk_price", "minimum_order_qty", "raw_price_text",
+    "gtin_case", "ean", "gtin", "barcode_raw", "identifier_type",
 ]
 
 
@@ -180,6 +182,11 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
         result["products"] = upc_enrichment.enrich_products_upc(
             result["products"], providers=default_providers()
         )
+        result["products"] = normalize_products(result["products"])
+        result["diagnostics"] = build_quality_report(
+            result["products"],
+            strategy_name=result.get("strategy_name", ""),
+        )
 
         # ── Data quality metrics ──────────────────────────────────────────
         products = result["products"]
@@ -226,13 +233,14 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
             strategy_id=result["strategy_id"],
             strategy_name=result["strategy_name"],
             products=result["products"],
+            diagnostics=result.get("diagnostics", {}),
         )
         logging.info(
             f"[Job {run_id}] Completed — {len(result['products'])} product(s)"
         )
     except Exception as e:
         logging.exception(f"[Job {run_id}] Scrape worker failed")
-        database.fail_run(run_id, str(e))
+        database.fail_run(run_id, str(e), diagnostics=build_error_report(e, stage="worker"))
 
 
 def _run_auth_scrape_worker(
@@ -248,18 +256,31 @@ def _run_auth_scrape_worker(
     try:
         products = playwright_catalog.run(state_file, url)
         enrich_all_pack(products)
+        products = normalize_products(products)
+        crawl_diagnostics = getattr(playwright_catalog, "LAST_CRAWL_DIAGNOSTICS", {}) or {}
+        diagnostics = build_quality_report(
+            products,
+            strategy_name=playwright_catalog.NAME,
+            expected_products=crawl_diagnostics.get("expected_products"),
+            expected_pages=crawl_diagnostics.get("expected_pages"),
+            pages_visited=crawl_diagnostics.get("pages_visited"),
+            stop_reason=crawl_diagnostics.get("stop_reason", ""),
+        )
+        if crawl_diagnostics:
+            diagnostics["crawl"] = dict(crawl_diagnostics)
         database.complete_run(
             run_id=run_id,
             strategy_id=playwright_catalog.ID,
             strategy_name=playwright_catalog.NAME,
             products=products,
+            diagnostics=diagnostics,
         )
         logging.info(
             f"[Job {run_id}] Auth scrape completed - {len(products)} product(s)"
         )
     except Exception as e:
         logging.exception(f"[Job {run_id}] Auth scrape worker failed")
-        database.fail_run(run_id, str(e))
+        database.fail_run(run_id, str(e), diagnostics=build_error_report(e, stage="authenticated_worker"))
     finally:
         browser_login.finish_session(session_id)
 

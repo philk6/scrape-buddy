@@ -41,11 +41,13 @@ Crash safety:
 """
 
 import logging
+import json
+import os
 import re
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
-from scraper import extract_products
+from scraper import _DYNAMIC_EXPANSION_SELECTORS, _expand_dynamic_catalog, extract_products
 from strategies.detail import (
     _collect_product_links,
     _extract_from_detail_page,
@@ -54,16 +56,26 @@ from strategies.detail import (
 )
 
 logger = logging.getLogger(__name__)
+LAST_CRAWL_DIAGNOSTICS: dict = {}
 
 # Strategy metadata
 ID   = 3
 NAME = "Playwright Rendered Catalog"
 
-# Hard caps
-MAX_PAGES         = 100    # max listing/category pages to paginate
-RENDER_WAIT_MS    = 4_000  # ms to wait after navigation for JS to render
-DETAIL_PAGE_LIMIT = 2_000  # max detail pages to visit per run
-AUTH_DETAIL_ENRICH_LIMIT = 24  # keep authenticated detail enrichment bounded by default
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, "").strip())
+        return value if value > 0 else default
+    except Exception:
+        return default
+
+
+# Hard caps. Defaults favor full catalog coverage; override with env vars for
+# benchmarks or when a supplier has an unusually large catalog.
+MAX_PAGES         = _positive_int_env("SCRAPEBUDDY_AUTH_LISTING_LIMIT", 100)
+RENDER_WAIT_MS    = _positive_int_env("SCRAPEBUDDY_AUTH_RENDER_WAIT_MS", 4_000)
+DETAIL_PAGE_LIMIT = _positive_int_env("SCRAPEBUDDY_AUTH_DETAIL_LIMIT", 2_000)
+AUTH_DETAIL_ENRICH_LIMIT = _positive_int_env("SCRAPEBUDDY_AUTH_DETAIL_ENRICH_LIMIT", DETAIL_PAGE_LIMIT)
 
 NASSAU_ERROR_TITLES = {"oops.", "404", "page not found"}
 
@@ -130,6 +142,11 @@ _RESULT_COUNT_RE = re.compile(
     r"([\d,]+)",                  # total       (e.g. "53")
     re.IGNORECASE,
 )
+from strategies.product_quality import normalize_product
+_SIMPLE_RESULT_TOTAL_RE = re.compile(
+    r"\b([\d,]+)\s+(?:results?|items?|products?)\b",
+    re.IGNORECASE,
+)
 
 # Matches "Page 1 of 3" style indicators
 _PAGE_OF_TOTAL_RE = re.compile(
@@ -180,6 +197,19 @@ _BAD_SKU_RE = re.compile(
     r"product[\-]card|image|icon|btn[\-]|container|wrapper|tooltip|modal",
     re.IGNORECASE,
 )
+
+_API_URL_HINTS = (
+    "api", "graphql", "search", "catalog", "category", "product", "products",
+    "items", "browse", "listing", "facets",
+)
+
+_PRODUCT_OBJECT_KEYS = {
+    "name", "title", "productname", "product_name", "description",
+    "sku", "itemnumber", "item_number", "productid", "product_id",
+    "id", "price", "brand", "image", "imageurl", "image_url",
+    "url", "href", "producturl", "product_url", "upc", "ean", "gtin",
+    "barcode",
+}
 
 
 # ── Page helpers ──────────────────────────────────────────────────────────────
@@ -649,6 +679,177 @@ def _extract_card_product(element, base_url: str, index: int = 0) -> dict:
         return {}
 
 
+def _lookup_any(obj: dict, names: tuple[str, ...]) -> str:
+    lowered = {str(k).lower().replace("-", "").replace("_", ""): v for k, v in obj.items()}
+    for name in names:
+        key = name.lower().replace("-", "").replace("_", "")
+        value = lowered.get(key)
+        if value is None:
+            continue
+        if isinstance(value, dict):
+            value = value.get("name") or value.get("url") or value.get("src")
+        if isinstance(value, list):
+            value = next((v for v in value if isinstance(v, (str, int, float))), "")
+        text = str(value or "").strip()
+        if text and text.lower() not in {"none", "null", "false"}:
+            return text
+    return ""
+
+
+def _api_object_to_product(obj: dict, base_url: str) -> dict:
+    if not isinstance(obj, dict):
+        return {}
+    product_url = _lookup_any(
+        obj,
+        ("product_url", "productUrl", "url", "href", "canonicalUrl", "pdpUrl", "detailUrl"),
+    )
+    if product_url:
+        product_url = urljoin(base_url, product_url)
+    image_url = _lookup_any(
+        obj,
+        ("image_url", "imageUrl", "image", "thumbnail", "thumbnailUrl", "src"),
+    )
+    if image_url:
+        image_url = urljoin(base_url, image_url)
+    price = _lookup_any(obj, ("price", "salePrice", "unitPrice", "currentPrice"))
+    if price and not price.startswith("$") and re.fullmatch(r"\d+(?:\.\d{1,2})?", price):
+        price = f"${price}"
+    product = {
+        "product_name": _lookup_any(obj, ("product_name", "productName", "name", "title", "description")),
+        "brand": _lookup_any(obj, ("brand", "brandName", "manufacturer", "vendor")),
+        "sku": _lookup_any(obj, ("sku", "itemNumber", "itemNo", "itemId", "productId", "id")),
+        "upc": _lookup_any(obj, ("upc", "gtin", "gtin12", "gtin13", "gtin14", "ean", "barcode")),
+        "price": price,
+        "pack_size": _lookup_any(obj, ("packSize", "pack_size", "size")),
+        "case_pack": _lookup_any(obj, ("casePack", "case_pack", "caseQty", "unitsPerCase")),
+        "image_url": image_url,
+        "product_url": product_url,
+    }
+    if not (product["product_name"] or product["product_url"] or product["sku"]):
+        return {}
+    return normalize_product(product)
+
+
+def _walk_api_payload(payload, base_url: str, products: list[dict], urls: list[str], *, limit: int = 3000) -> None:
+    if len(products) >= limit:
+        return
+    if isinstance(payload, dict):
+        keys = {str(k).lower().replace("-", "").replace("_", "") for k in payload.keys()}
+        if len(keys & _PRODUCT_OBJECT_KEYS) >= 2:
+            product = _api_object_to_product(payload, base_url)
+            if product:
+                products.append(product)
+                url = product.get("product_url")
+                if url and _looks_like_product_detail_url(url):
+                    urls.append(url)
+        for value in payload.values():
+            if isinstance(value, (dict, list)):
+                _walk_api_payload(value, base_url, products, urls, limit=limit)
+            elif isinstance(value, str):
+                found_url = urljoin(base_url, value)
+                if _looks_like_product_detail_url(found_url):
+                    urls.append(found_url)
+    elif isinstance(payload, list):
+        for item in payload:
+            if len(products) >= limit:
+                break
+            _walk_api_payload(item, base_url, products, urls, limit=limit)
+
+
+def _attach_network_product_capture(page, base_url: str) -> dict:
+    capture = {"products": [], "urls": [], "seen_urls": set(), "seen_products": set()}
+
+    def on_response(response):
+        try:
+            url = response.url or ""
+            if not any(hint in url.lower() for hint in _API_URL_HINTS):
+                return
+            headers = response.headers or {}
+            content_type = (headers.get("content-type") or headers.get("Content-Type") or "").lower()
+            if "json" not in content_type and "graphql" not in url.lower():
+                return
+            payload = response.json()
+            products: list[dict] = []
+            urls: list[str] = []
+            _walk_api_payload(payload, base_url, products, urls)
+
+            new_products = 0
+            for product in products:
+                key = (
+                    product.get("product_url")
+                    or product.get("sku")
+                    or f"{product.get('product_name')}|{product.get('price')}"
+                )
+                if not key or key in capture["seen_products"]:
+                    continue
+                capture["seen_products"].add(key)
+                capture["products"].append(product)
+                new_products += 1
+
+            new_urls = 0
+            for found_url in urls:
+                if found_url in capture["seen_urls"]:
+                    continue
+                capture["seen_urls"].add(found_url)
+                capture["urls"].append(found_url)
+                new_urls += 1
+
+            if new_products or new_urls:
+                logger.info(
+                    f"[Strategy 3] API capture: +{new_products} product object(s), "
+                    f"+{new_urls} product URL(s) from {url[:120]}"
+                )
+        except Exception:
+            return
+
+    try:
+        page.on("response", on_response)
+    except Exception as e:
+        logger.debug(f"[Strategy 3] API capture unavailable: {e}")
+    return capture
+
+
+def _extract_embedded_json_products(html: str, base_url: str) -> tuple[list[dict], list[str]]:
+    """
+    Extract products from JSON blobs embedded in the rendered page.
+
+    This catches Next.js/Nuxt/Hydrogen/etc. pages where the product data is
+    present in script tags even if the card DOM is sparse or virtualized.
+    """
+    products: list[dict] = []
+    urls: list[str] = []
+    try:
+        soup = BeautifulSoup(html or "", "html.parser")
+        for script in soup.find_all("script"):
+            script_type = (script.get("type") or "").lower()
+            script_id = (script.get("id") or "").lower()
+            if (
+                "json" not in script_type
+                and script_id not in {"__next_data__", "__nuxt_data__"}
+            ):
+                continue
+            text = (script.string or script.get_text() or "").strip()
+            if not text or len(text) > 5_000_000:
+                continue
+            if not (text.startswith("{") or text.startswith("[")):
+                continue
+            try:
+                payload = json.loads(text)
+            except Exception:
+                continue
+            before_products = len(products)
+            before_urls = len(urls)
+            _walk_api_payload(payload, base_url, products, urls)
+            if len(products) > before_products or len(urls) > before_urls:
+                logger.info(
+                    f"[Strategy 3] Embedded JSON capture: +{len(products) - before_products} "
+                    f"product object(s), +{len(urls) - before_urls} product URL(s)"
+                )
+    except Exception as e:
+        logger.debug(f"[Strategy 3] Embedded JSON capture failed: {e}")
+    return products, urls
+
+
 # ── Pagination helpers ────────────────────────────────────────────────────────
 
 def _follow_next_page(page, visited: set, base_netloc: str) -> bool:
@@ -738,6 +939,183 @@ def _get_content_fingerprint(page, selector: str | None) -> str:
         ) or ""
     except Exception:
         return ""
+
+
+def _candidate_page_urls(current_url: str, target_page: int) -> list[str]:
+    """
+    Build conservative page-N URL candidates for catalogs that expose a result
+    count but do not render clickable pagination controls until interaction.
+    """
+    parsed = urlparse(current_url)
+    query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    query_keys = {key.lower() for key, _ in query_pairs}
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add(url: str) -> None:
+        if url and url != current_url and url not in seen:
+            seen.add(url)
+            candidates.append(url)
+
+    page_params = (
+        "page", "p", "pg", "pageNumber", "page_number",
+        "currentPage", "current_page", "pageIndex", "page_index",
+    )
+    for param in page_params:
+        updated = [(key, value) for key, value in query_pairs if key != param]
+        updated.append((param, str(target_page)))
+        add(urlunparse(parsed._replace(query=urlencode(updated, doseq=True))))
+
+    for key, value in query_pairs:
+        if key.lower() in {"perpage", "per_page", "pagesize", "page_size", "limit", "count"}:
+            try:
+                per_page = int(value)
+            except Exception:
+                continue
+            if per_page <= 0:
+                continue
+            offset = (target_page - 1) * per_page
+            for offset_key in ("offset", "start", "skip"):
+                updated = [(k, v) for k, v in query_pairs if k != offset_key]
+                updated.append((offset_key, str(offset)))
+                add(urlunparse(parsed._replace(query=urlencode(updated, doseq=True))))
+
+    if not query_keys:
+        add(urlunparse(parsed._replace(query=urlencode({"page": target_page}))))
+
+    path = parsed.path.rstrip("/")
+    if re.search(r"/page/\d+$", path, re.IGNORECASE):
+        add(urlunparse(parsed._replace(path=re.sub(r"/page/\d+$", f"/page/{target_page}", path, flags=re.IGNORECASE))))
+    else:
+        add(urlunparse(parsed._replace(path=f"{path}/page/{target_page}")))
+
+    return candidates[:16]
+
+
+def _try_candidate_page_urls(
+    page,
+    target_page: int,
+    visited: set,
+    base_netloc: str,
+    previous_fingerprint: str,
+    winning_selector: str | None,
+) -> bool:
+    current_url = page.url
+    for candidate in _candidate_page_urls(current_url, target_page):
+        parsed = urlparse(candidate)
+        if parsed.netloc and parsed.netloc != base_netloc:
+            continue
+        if candidate in visited:
+            continue
+        try:
+            logger.info(f"[Strategy 3] URL-pattern pagination probe -> {candidate}")
+            page.goto(candidate, wait_until="domcontentloaded", timeout=30_000)
+            _wait_for_render(page)
+            new_fingerprint = _get_content_fingerprint(page, winning_selector)
+            html = page.content()
+            links = _collect_product_links(html, candidate)
+            if (
+                links
+                and (
+                    not previous_fingerprint
+                    or not new_fingerprint
+                    or new_fingerprint != previous_fingerprint
+                )
+            ):
+                visited.add(candidate)
+                logger.info(
+                    f"[Strategy 3] URL-pattern pagination accepted page {target_page}: "
+                    f"{len(links)} product link(s)"
+                )
+                return True
+        except Exception as e:
+            logger.debug(f"[Strategy 3] URL-pattern pagination probe failed: {e}")
+
+    try:
+        if page.url != current_url:
+            page.goto(current_url, wait_until="domcontentloaded", timeout=30_000)
+            _wait_for_render(page)
+    except Exception:
+        pass
+    return False
+
+
+def _harvest_product_links_while_scrolling(
+    page,
+    current_url: str,
+    *,
+    max_rounds: int = 30,
+) -> list[str]:
+    """
+    Collect product links from dynamic/virtualized lists while moving through
+    the page. Some SPAs only keep the current viewport in the DOM, so waiting
+    until the end and reading page.content() can miss earlier/later products.
+    """
+    found: list[str] = []
+    seen: set[str] = set()
+    stable_rounds = 0
+    previous_signature: tuple[int, int, int] | None = None
+
+    for round_no in range(max_rounds + 1):
+        try:
+            html = page.content()
+            for link in _collect_product_links(html, current_url):
+                if link not in seen:
+                    seen.add(link)
+                    found.append(link)
+        except Exception as e:
+            logger.debug(f"[Strategy 3] Scroll harvest content error: {e}")
+
+        try:
+            signature = page.evaluate(
+                """() => [
+                    window.scrollY || document.documentElement.scrollTop || 0,
+                    document.body.scrollHeight || document.documentElement.scrollHeight || 0,
+                    document.querySelectorAll('a[href*="/product"], a[href*="/products"], a[href*="/item"], a[href*="/p/"]').length
+                ]"""
+            )
+            signature = tuple(int(x or 0) for x in signature)
+        except Exception:
+            signature = (0, 0, len(found))
+
+        if previous_signature == signature:
+            stable_rounds += 1
+        else:
+            stable_rounds = 0
+            previous_signature = signature
+
+        if round_no >= max_rounds or stable_rounds >= 4:
+            break
+
+        clicked = False
+        for selector in _DYNAMIC_EXPANSION_SELECTORS:
+            try:
+                button = page.query_selector(selector)
+                if button and button.is_visible() and button.is_enabled():
+                    button.scroll_into_view_if_needed()
+                    button.click()
+                    clicked = True
+                    logger.info(f"[Strategy 3] Scroll harvest clicked '{selector}'")
+                    break
+            except Exception:
+                continue
+
+        try:
+            page.evaluate(
+                """() => {
+                    const step = Math.max(450, Math.floor(window.innerHeight * 0.85));
+                    window.scrollBy(0, step);
+                }"""
+            )
+            page.wait_for_timeout(900 if clicked else 550)
+        except Exception:
+            pass
+
+    if found:
+        logger.info(
+            f"[Strategy 3] Scroll harvest collected {len(found)} unique product link(s)"
+        )
+    return found
 
 
 def _detect_max_page_button(page) -> int | None:
@@ -844,6 +1222,15 @@ def _detect_pagination_info(page) -> dict:
                     f"[Strategy 3] 'Page X of N' indicator: "
                     f"{info['total_pages']} page(s)"
                 )
+
+        if info["total_products"] is None:
+            m3 = _SIMPLE_RESULT_TOTAL_RE.search(text)
+            if m3:
+                info["total_products"] = int(m3.group(1).replace(",", ""))
+                logger.info(
+                    f"[Strategy 3] Simple result count: "
+                    f"{info['total_products']} product(s)"
+                )
     except Exception as e:
         logger.debug(f"[Strategy 3] Result-count text detection error: {e}")
 
@@ -898,7 +1285,21 @@ def _click_numbered_page(page, target_page: int, winning_selector: str | None) -
                     for item in items:
                         try:
                             text = (item.text_content() or "").strip()
-                            if text == target_str and item.is_visible():
+                            attrs = " ".join(
+                                item.get_attribute(name) or ""
+                                for name in (
+                                    "aria-label", "title", "data-page",
+                                    "data-page-number", "data-testid", "value",
+                                )
+                            )
+                            haystack = f"{text} {attrs}".strip()
+                            exact_text = text == target_str
+                            attr_match = re.search(
+                                rf"(?:^|\b)(?:page\s*)?{re.escape(target_str)}(?:\b|$)",
+                                haystack,
+                                re.IGNORECASE,
+                            )
+                            if (exact_text or attr_match) and item.is_visible():
                                 item.scroll_into_view_if_needed()
                                 item.click()
                                 try:
@@ -927,10 +1328,19 @@ def _click_numbered_page(page, target_page: int, winning_selector: str | None) -
                 const all = Array.from(
                     document.querySelectorAll('a, button, li, span')
                 );
-                for (const el of all) {
+                const matches = (el) => {
                     const text = (el.textContent || '').trim();
+                    if (text === targetStr) return true;
+                    const attrs = [
+                        'aria-label', 'title', 'data-page',
+                        'data-page-number', 'data-testid', 'value'
+                    ].map(name => el.getAttribute(name) || '').join(' ');
+                    const haystack = `${text} ${attrs}`.trim().toLowerCase();
+                    return haystack.split(/\\D+/).filter(Boolean).includes(targetStr);
+                };
+                for (const el of all) {
                     // offsetParent !== null means the element is visible
-                    if (text === targetStr && el.offsetParent !== null) {
+                    if (matches(el) && el.offsetParent !== null) {
                         el.click();
                         return true;
                     }
@@ -961,6 +1371,7 @@ def _click_numbered_page(page, target_page: int, winning_selector: str | None) -
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def run(state_file: str, listing_url: str) -> list:
+    LAST_CRAWL_DIAGNOSTICS.clear()
     """
     Strategy 3 entry point.
 
@@ -1040,9 +1451,13 @@ def _looks_like_product_detail_url(url: str) -> bool:
         return False
     if any(token in url for token in ["/customer/", "/search", "?product_list", "javascript:"]):
         return False
-    if any(token in url for token in ["/g/", "/collections/", "/category", "filter="]):
+    if any(token in url for token in ["/g/", "/collections/", "/category", "/categories/", "filter="]):
         return False
-    if '/products/' in url:
+    if any(token in url for token in (
+        "/products/", "/product/", "/item/", "/p/", "/pd/", "/dp/",
+        "product_detail", "productdetail", "product-detail",
+        "itemdetail", "item-detail", "item_detail",
+    )):
         return True
     if not url.endswith('.html'):
         return False
@@ -1081,6 +1496,29 @@ def _is_valid_detail_product(detail: dict) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _looks_like_aggregate_product(product: dict) -> bool:
+    """Reject search/category summary rows that are not actual products."""
+    name = (product.get("product_name") or "").strip().lower()
+    sku = (product.get("sku") or "").strip()
+    upc = (product.get("upc") or "").strip()
+    url = (product.get("product_url") or "").strip().lower()
+    if not name:
+        return False
+    summary_patterns = [
+        r"^\d[\d,]*\s+results?\s+for\b",
+        r"^\d[\d,]*\s+items?\s+for\b",
+        r"^\d[\d,]*\s+products?\s+for\b",
+        r"^showing\s+\d[\d,]*\s*(?:-|to|–)\s*\d[\d,]*\s+of\s+\d[\d,]*",
+    ]
+    if any(re.search(pattern, name, re.IGNORECASE) for pattern in summary_patterns):
+        return not (sku or upc)
+    if " results for " in name and not (sku or upc):
+        return True
+    if url and not _looks_like_product_detail_url(url) and re.search(r"\b(results?|items?|products?)\b", name):
+        return True
+    return False
+
+
 def _merge_listing_and_detail(listing: dict, detail: dict) -> dict:
     """
     Merge authenticated listing-card data with richer detail-page data.
@@ -1107,8 +1545,35 @@ def _merge_listing_and_detail(listing: dict, detail: dict) -> dict:
         "minimum_order_qty": detail.get("minimum_order_qty") or listing.get("minimum_order_qty") or "",
         "raw_price_text": detail.get("raw_price_text") or listing.get("raw_price_text") or "",
         "gtin_case": detail.get("gtin_case") or listing.get("gtin_case") or "",
+        "ean": detail.get("ean") or listing.get("ean") or "",
+        "gtin": detail.get("gtin") or listing.get("gtin") or "",
+        "barcode_raw": detail.get("barcode_raw") or listing.get("barcode_raw") or "",
+        "identifier_type": detail.get("identifier_type") or listing.get("identifier_type") or "",
     }
     return merged
+
+
+def _select_detail_enrichment_links(
+    all_product_links: list[str],
+    valid_listing_urls: set[str],
+) -> list[str]:
+    """
+    Choose detail URLs to visit after listing crawl.
+
+    Product links collected from the rendered page are more authoritative than
+    card-level extraction. Card extraction can collapse a grid into one wrapper
+    row, but real hrefs are still useful detail targets.
+    """
+    detail_link_pool = [
+        url for url in all_product_links
+        if _looks_like_product_detail_url(url)
+    ]
+    return detail_link_pool or [url for url in all_product_links if url in valid_listing_urls] or list(valid_listing_urls)
+
+
+def _set_last_crawl_diagnostics(**values) -> None:
+    LAST_CRAWL_DIAGNOSTICS.clear()
+    LAST_CRAWL_DIAGNOSTICS.update({k: v for k, v in values.items() if v not in (None, "", [])})
 
 
 def _dedup_products(products: list) -> tuple:
@@ -1196,6 +1661,7 @@ def _run_inner(page, listing_url: str) -> list:
     """
     base_netloc       = urlparse(listing_url).netloc
     visited_pages     = {listing_url}
+    api_capture       = _attach_network_product_capture(page, listing_url)
 
     all_product_links: list    = []
     seen_links:        set     = set()
@@ -1210,12 +1676,22 @@ def _run_inner(page, listing_url: str) -> list:
         page.goto(listing_url, wait_until="domcontentloaded", timeout=30_000)
     except Exception as e:
         logger.error(f"[Strategy 3] Navigation failed: {e}")
+        _set_last_crawl_diagnostics(
+            expected_products=None,
+            expected_pages=None,
+            pages_visited=0,
+            product_links_collected=0,
+            api_products_collected=0,
+            stop_reason=f"initial navigation failed: {e}",
+        )
         return []
 
     _wait_for_render(page)
 
     page_num:    int           = 0
     total_pages: int | None    = None   # set after page 1
+    total_products: int | None = None
+    stop_reason = ""
 
     while page_num < MAX_PAGES:
         page_num += 1
@@ -1228,6 +1704,58 @@ def _run_inner(page, listing_url: str) -> list:
         )
         logger.info(f"[Strategy 3] === {page_label}: {current_url} ===")
 
+        try:
+            _expand_dynamic_catalog(page, max_rounds=6)
+        except Exception as e:
+            logger.debug(f"[Strategy 3] Dynamic expansion skipped: {e}")
+
+        harvested_links = _harvest_product_links_while_scrolling(
+            page,
+            current_url,
+            max_rounds=30,
+        )
+        if harvested_links:
+            new_harvested = [lk for lk in harvested_links if lk not in seen_links]
+            seen_links.update(harvested_links)
+            all_product_links.extend(new_harvested)
+            logger.info(
+                f"[Strategy 3] {page_label}: scroll harvest "
+                f"{len(harvested_links)} link(s), {len(new_harvested)} new"
+            )
+            try:
+                page.evaluate("window.scrollTo(0, 0)")
+                page.wait_for_timeout(500)
+            except Exception:
+                pass
+
+        if api_capture["urls"]:
+            new_api_links = [lk for lk in api_capture["urls"] if lk not in seen_links]
+            seen_links.update(api_capture["urls"])
+            all_product_links.extend(new_api_links)
+            if new_api_links:
+                logger.info(
+                    f"[Strategy 3] {page_label}: API capture contributed "
+                    f"{len(new_api_links)} new product link(s)"
+                )
+
+        if api_capture["products"]:
+            existing_keys = {
+                p.get("product_url") or p.get("sku") or f"{p.get('product_name')}|{p.get('price')}"
+                for p in all_card_products
+            }
+            new_api_products = []
+            for product in api_capture["products"]:
+                key = product.get("product_url") or product.get("sku") or f"{product.get('product_name')}|{product.get('price')}"
+                if key and key not in existing_keys:
+                    existing_keys.add(key)
+                    new_api_products.append(product)
+            if new_api_products:
+                logger.info(
+                    f"[Strategy 3] {page_label}: API capture contributed "
+                    f"{len(new_api_products)} product row(s)"
+                )
+                all_card_products.extend(new_api_products)
+
         # ── Get fully rendered HTML ───────────────────────────────────────────
         try:
             html = page.content()
@@ -1238,6 +1766,38 @@ def _run_inner(page, listing_url: str) -> list:
             break
 
         # ── Approach A: collect /products/ links ──────────────────────────────
+        embedded_products, embedded_urls = _extract_embedded_json_products(
+            html,
+            current_url,
+        )
+        if embedded_urls:
+            new_embedded_links = [lk for lk in embedded_urls if lk not in seen_links]
+            seen_links.update(embedded_urls)
+            all_product_links.extend(new_embedded_links)
+            if new_embedded_links:
+                logger.info(
+                    f"[Strategy 3] {page_label}: embedded JSON contributed "
+                    f"{len(new_embedded_links)} new product link(s)"
+                )
+        if embedded_products:
+            existing_keys = {
+                p.get("product_url") or p.get("sku") or f"{p.get('product_name')}|{p.get('price')}"
+                for p in all_card_products
+            }
+            new_embedded_products = []
+            for product in embedded_products:
+                key = product.get("product_url") or product.get("sku") or f"{product.get('product_name')}|{product.get('price')}"
+                if key and key not in existing_keys:
+                    existing_keys.add(key)
+                    new_embedded_products.append(product)
+            if new_embedded_products:
+                logger.info(
+                    f"[Strategy 3] {page_label}: embedded JSON contributed "
+                    f"{len(new_embedded_products)} product row(s)"
+                )
+                all_card_products.extend(new_embedded_products)
+
+        page_links: list[str] = []
         try:
             page_links = _collect_product_links(html, current_url)
             new_links  = [lk for lk in page_links if lk not in seen_links]
@@ -1298,7 +1858,9 @@ def _run_inner(page, listing_url: str) -> list:
 
             for i, elem in enumerate(card_elements, 1):
                 product = _extract_card_product(elem, current_url, index=i)
-                if product.get("product_name") or product.get("product_url"):
+                if _looks_like_aggregate_product(product):
+                    incomplete_count += 1
+                elif product.get("product_name") or product.get("product_url"):
                     page_card_products.append(product)
                 else:
                     incomplete_count += 1
@@ -1323,7 +1885,13 @@ def _run_inner(page, listing_url: str) -> list:
                     f"[Strategy 3] {page_label}: "
                     f"full-page heuristics found {len(fallback)} product(s)"
                 )
-                all_card_products.extend(fallback)
+                filtered = [p for p in fallback if not _looks_like_aggregate_product(p)]
+                if len(filtered) != len(fallback):
+                    logger.info(
+                        f"[Strategy 3] {page_label}: rejected "
+                        f"{len(fallback) - len(filtered)} aggregate fallback row(s)"
+                    )
+                all_card_products.extend(filtered)
             except Exception as e:
                 logger.warning(f"[Strategy 3] Full-page heuristics failed: {e}")
 
@@ -1331,11 +1899,26 @@ def _run_inner(page, listing_url: str) -> list:
         if page_num == 1:
             pagination = _detect_pagination_info(page)
             total_pages = pagination["total_pages"]
+            total_products = pagination.get("total_products")
 
-            if pagination.get("total_products"):
+            if total_products:
+                page_link_count = max(
+                    len(page_links),
+                    len(harvested_links),
+                    len(api_capture["urls"]),
+                )
+                if not pagination.get("per_page") and page_link_count:
+                    pagination["per_page"] = page_link_count
+                if pagination.get("per_page") and not total_pages:
+                    import math
+                    total_pages = max(
+                        1,
+                        math.ceil(total_products / pagination["per_page"]),
+                    )
+                    pagination["total_pages"] = total_pages
                 logger.info(
                     f"[Strategy 3] Result count: "
-                    f"{pagination['total_products']} total product(s) | "
+                    f"{total_products} total product(s) | "
                     f"{pagination.get('per_page', '?')} per page"
                 )
             if total_pages:
@@ -1351,6 +1934,7 @@ def _run_inner(page, listing_url: str) -> list:
 
         # ── Have we visited all known pages? ──────────────────────────────────
         if total_pages is not None and page_num >= total_pages:
+            stop_reason = f"all {total_pages} page(s) visited"
             logger.info(
                 f"[Strategy 3] All {total_pages} page(s) scraped — "
                 f"pagination complete"
@@ -1370,8 +1954,21 @@ def _run_inner(page, listing_url: str) -> list:
                 navigated = _click_numbered_page(
                     page, target_page, winning_selector
                 )
+            if not navigated and total_pages is not None and target_page <= total_pages:
+                navigated = _try_candidate_page_urls(
+                    page,
+                    target_page,
+                    visited_pages,
+                    base_netloc,
+                    fingerprint_before,
+                    winning_selector,
+                )
 
         if not navigated:
+            if total_pages and page_num < total_pages:
+                stop_reason = f"no navigation path found after page {page_num}"
+            else:
+                stop_reason = f"navigation exhausted after page {page_num}"
             logger.info(
                 f"[Strategy 3] No navigation path found after page {page_num} — "
                 f"pagination complete"
@@ -1387,6 +1984,7 @@ def _run_inner(page, listing_url: str) -> list:
         if (fingerprint_before
                 and fingerprint_after
                 and fingerprint_after == fingerprint_before):
+            stop_reason = f"content unchanged after navigating from page {page_num}"
             logger.warning(
                 f"[Strategy 3] Content unchanged after navigating from "
                 f"page {page_num} — stopping to prevent loop. "
@@ -1395,6 +1993,21 @@ def _run_inner(page, listing_url: str) -> list:
             break
 
     # ── Listing crawl summary ─────────────────────────────────────────────────
+    if not stop_reason:
+        if page_num >= MAX_PAGES:
+            stop_reason = f"max page cap reached ({MAX_PAGES})"
+        else:
+            stop_reason = f"crawl stopped after {page_num} page(s)"
+
+    _set_last_crawl_diagnostics(
+        expected_products=total_products,
+        expected_pages=total_pages,
+        pages_visited=page_num,
+        product_links_collected=len(all_product_links),
+        api_products_collected=len(api_capture["products"]),
+        stop_reason=stop_reason,
+    )
+
     logger.info(
         f"[Strategy 3] Listing crawl complete: "
         f"{page_num} page(s) visited | "
@@ -1427,9 +2040,15 @@ def _run_inner(page, listing_url: str) -> list:
                 f"[Strategy 3] Detail candidates: {len(valid_listing_urls)} valid listing detail URL(s)"
             )
 
-        enrich_links = [url for url in all_product_links if url in valid_listing_urls]
-        if not enrich_links:
-            enrich_links = list(valid_listing_urls)
+        detail_link_pool = _select_detail_enrichment_links(all_product_links, valid_listing_urls)
+        if len(detail_link_pool) > len(valid_listing_urls):
+            logger.info(
+                f"[Strategy 3] Using collected product links as authoritative "
+                f"detail targets: {len(detail_link_pool)} link(s) vs "
+                f"{len(valid_listing_urls)} listing-row URL(s)"
+            )
+
+        enrich_links = detail_link_pool
 
         if len(enrich_links) > AUTH_DETAIL_ENRICH_LIMIT:
             logger.info(

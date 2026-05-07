@@ -1,0 +1,245 @@
+label,url,segment,notes
+Uline,https://www.uline.com/,wholesale_b2b,shipping and industrial supplies
+WebstaurantStore,https://www.webstaurantstore.com/,wholesale_b2b,restaurant supplies
+Grainger,https://www.grainger.com/,industrial_distributor,industrial supply
+McMaster-Carr,https://www.mcmaster.com/,industrial_distributor,industrial supply
+Zoro,https://www.zoro.com/,industrial_distributor,industrial and MRO
+Global Industrial,https://www.globalindustrial.com/,industrial_distributor,industrial supply
+Quill,https://www.quill.com/,office_distributor,office and business supplies
+Staples,https://www.staples.com/,office_retailer,office supplies
+Office Depot,https://www.officedepot.com/,office_retailer,office supplies
+SupplyHouse,https://www.supplyhouse.com/,trade_distributor,plumbing HVAC supplies
+Parts Town,https://www.partstown.com/,foodservice_parts,restaurant equipment parts
+FoodServiceDirect,https://www.foodservicedirect.com/,foodservice_distributor,bulk foodservice
+CleanItSupply,https://www.cleanitsupply.com/,janitorial_distributor,janitorial supplies
+CleanFreak,https://www.cleanfreak.com/,janitorial_distributor,cleaning equipment
+Betty Mills,https://www.bettymills.com/,wholesale_b2b,janitorial and office
+DollarDays,https://www.dollardays.com/,wholesale_b2b,bulk wholesale
+Bargain Wholesale,https://www.bargainw.com/,wholesale_b2b,discount wholesale
+Kole Imports,https://www.koleimports.com/,wholesale_b2b,import wholesale
+Wholesale Central,https://www.wholesalecentral.com/,wholesale_marketplace,wholesale directory
+Faire,https://www.faire.com/,wholesale_marketplace,brand wholesale marketplace
+Tundra,https://www.tundra.com/,wholesale_marketplace,wholesale marketplace
+Alibaba,https://www.alibaba.com/,wholesale_marketplace,global wholesale marketplace
+AliExpress,https://www.aliexpress.us/,marketplace,cross-border retail marketplace
+DHgate,https://www.dhgate.com/,wholesale_marketplace,global wholesale marketplace
+Global Sources,https://www.globalsources.com/,wholesale_marketplace,global wholesale marketplace
+Made-in-China,https://www.made-in-china.com/,wholesale_marketplace,global wholesale marketplace
+BULQ,https://www.bulq.com/,liquidation_wholesale,liquidation lots
+Liquidation.com,https://www.liquidation.com/,liquidation_wholesale,liquidation marketplace
+Direct Liquidation,https://www.directliquidation.com/,liquidation_wholesale,liquidation marketplace
+B-Stock,https://bstock.com/,liquidation_wholesale,liquidation marketplace
+888 Lots,https://www.888lots.com/,liquidation_wholesale,liquidation lots
+Quicklotz,https://www.quicklotz.com/,liquidation_wholesale,liquidation lots
+DollarItemDirect,https://www.dollaritem.com/,wholesale_b2b,dollar item wholesale
+Kelli's Gift Shop Suppliers,https://www.kellisgifts.com/,wholesale_b2b,gift wholesale
+eWorldTrade,https://www.eworldtrade.com/,wholesale_marketplace,b2b marketplace
+KaTom,https://www.katom.com/,restaurant_supply,restaurant equipment
+Wasserstrom,https://www.wasserstrom.com/,restaurant_supply,restaurant equipment
+RestaurantSupply.com,https://www.restaurantsupply.com/,restaurant_supply,restaurant equipment
+CKitchen,https://www.ckitchen.com/,restaurant_supply,restaurant equipment
+Culinary Depot,https://www.culinarydepotinc.com/,restaurant_supply,restaurant equipment
+Central Restaurant Products,https://www.centralrestaurant.com/,restaurant_supply,restaurant equipment
+TigerChef,https://www.tigerchef.com/,restaurant_supply,restaurant equipment
+Rapids Wholesale,https://rapidswholesale.com/,restaurant_supply,restaurant equipment
+Mission Restaurant Supply,https://www.missionrs.com/,restaurant_supply,restaurant equipment
+Chef's Warehouse,https://www.chefswarehouse.com/,foodservice_distributor,specialty foodservice
+MSC Industrial Supply,https://www.mscdirect.com/,industrial_distributor,industrial supply
+Fastenal,https://www.fastenal.com/,industrial_distributor,industrial fasteners
+Applied Industrial,https://www.applied.com/,industrial_distributor,industrial parts
+Motion,https://www.motion.com/,industrial_distributor,industrial parts
+Digi-Key,https://www.digikey.com/,electronics_distributor,electronic components
+Mouser,https://www.mouser.com/,electronics_distributor,electronic components
+Newark,https://www.newark.com/,electronics_distributor,electronic components
+RS Americas,https://us.rs-online.com/,electronics_distributor,industrial electronics
+AutomationDirect,https://www.automationdirect.com/,industrial_distributor,automation supplies
+HD Supply,https://hdsupplysolutions.com/,industrial_distributor,facilities supply
+Ferguson,https://www.ferguson.com/,trade_distributor,plumbing HVAC
+Winsupply,https://www.winsupplyinc.com/,trade_distributor,trade supplies
+Rexel USA,https://www.rexelusa.com/,electrical_distributor,electrical supplies
+Graybar,https://www.graybar.com/,electrical_distributor,electrical supplies
+Platt Electric,https://www.platt.com/,electrical_distributor,electrical supplies
+Elliott Electric,https://www.elliottelectric.com/,electrical_distributor,electrical supplies
+Build.com,https://www.build.com/,home_improvement,fixtures and home improvement
+Acme Tools,https://www.acmetools.com/,tools_retailer,tools and equipment
+Northern Tool,https://www.northerntool.com/,tools_retailer,tools and equipment
+Toolbarn,https://www.toolbarn.com/,tools_retailer,tools
+Walmart,https://www.walmart.com/,mass_retailer,big box marketplace
+Target,https://www.target.com/,mass_retailer,big box retailer
+Amazon,https://www.amazon.com/,marketplace,large marketplace likely bot protected
+Costco,https://www.costco.com/,warehouse_club,warehouse club retail
+Sam's Club,https://www.samsclub.com/,warehouse_club,warehouse club retail
+BJs Wholesale Club,https://www.bjs.com/,warehouse_club,warehouse club retail
+Kroger,https://www.kroger.com/,grocery_retailer,grocery
+Albertsons,https://www.albertsons.com/,grocery_retailer,grocery
+Safeway,https://www.safeway.com/,grocery_retailer,grocery
+H-E-B,https://www.heb.com/,grocery_retailer,grocery
+Meijer,https://www.meijer.com/,mass_retailer,grocery and general
+Publix,https://www.publix.com/,grocery_retailer,grocery
+Whole Foods Market,https://www.wholefoodsmarket.com/,grocery_retailer,grocery
+ShopRite,https://www.shoprite.com/,grocery_retailer,grocery
+Wegmans,https://www.wegmans.com/,grocery_retailer,grocery
+Hy-Vee,https://www.hy-vee.com/,grocery_retailer,grocery
+Fred Meyer,https://www.fredmeyer.com/,grocery_retailer,grocery and general
+Ralphs,https://www.ralphs.com/,grocery_retailer,grocery
+Vons,https://www.vons.com/,grocery_retailer,grocery
+Food Lion,https://www.foodlion.com/,grocery_retailer,grocery
+Giant Food,https://giantfood.com/,grocery_retailer,grocery
+Stop & Shop,https://stopandshop.com/,grocery_retailer,grocery
+CVS,https://www.cvs.com/,pharmacy_retailer,pharmacy retail
+Walgreens,https://www.walgreens.com/,pharmacy_retailer,pharmacy retail
+Rite Aid,https://www.riteaid.com/,pharmacy_retailer,pharmacy retail
+Macy's,https://www.macys.com/,department_store,department retail
+Nordstrom,https://www.nordstrom.com/,department_store,department retail
+Kohl's,https://www.kohls.com/,department_store,department retail
+JCPenney,https://www.jcpenney.com/,department_store,department retail
+Dillard's,https://www.dillards.com/,department_store,department retail
+Belk,https://www.belk.com/,department_store,department retail
+Saks Fifth Avenue,https://www.saksfifthavenue.com/,department_store,luxury retail
+Bloomingdale's,https://www.bloomingdales.com/,department_store,department retail
+H&M,https://www2.hm.com/en_us/index.html,apparel_retailer,apparel
+Zara,https://www.zara.com/us/,apparel_retailer,apparel
+Uniqlo,https://www.uniqlo.com/us/en/,apparel_retailer,apparel
+Gap,https://www.gap.com/,apparel_retailer,apparel
+Old Navy,https://oldnavy.gap.com/,apparel_retailer,apparel
+Banana Republic,https://bananarepublic.gap.com/,apparel_retailer,apparel
+J.Crew,https://www.jcrew.com/,apparel_retailer,apparel
+Madewell,https://www.madewell.com/,apparel_retailer,apparel
+Anthropologie,https://www.anthropologie.com/,apparel_retailer,apparel and home
+Urban Outfitters,https://www.urbanoutfitters.com/,apparel_retailer,apparel and lifestyle
+Free People,https://www.freepeople.com/,apparel_retailer,apparel
+ASOS,https://www.asos.com/us/,apparel_marketplace,apparel marketplace
+SHEIN,https://us.shein.com/,apparel_marketplace,apparel marketplace
+Fashion Nova,https://www.fashionnova.com/,apparel_retailer,apparel
+Forever 21,https://www.forever21.com/,apparel_retailer,apparel
+Aeropostale,https://www.aeropostale.com/,apparel_retailer,apparel
+American Eagle,https://www.ae.com/us/en,apparel_retailer,apparel
+Abercrombie,https://www.abercrombie.com/,apparel_retailer,apparel
+Hollister,https://www.hollisterco.com/,apparel_retailer,apparel
+lululemon,https://shop.lululemon.com/,apparel_retailer,athletic apparel
+Nike,https://www.nike.com/,sportswear_retailer,athletic apparel
+Adidas,https://www.adidas.com/us,sportswear_retailer,athletic apparel
+Under Armour,https://www.underarmour.com/en-us/,sportswear_retailer,athletic apparel
+Puma,https://us.puma.com/us/en,sportswear_retailer,athletic apparel
+Reebok,https://www.reebok.com/,sportswear_retailer,athletic apparel
+New Balance,https://www.newbalance.com/,sportswear_retailer,athletic apparel
+Foot Locker,https://www.footlocker.com/,footwear_retailer,footwear
+Champs Sports,https://www.champssports.com/,footwear_retailer,footwear
+Finish Line,https://www.finishline.com/,footwear_retailer,footwear
+DSW,https://www.dsw.com/,footwear_retailer,footwear
+Zappos,https://www.zappos.com/,footwear_retailer,footwear
+Wayfair,https://www.wayfair.com/,home_retailer,home goods
+Bed Bath & Beyond,https://www.bedbathandbeyond.com/,home_retailer,home goods
+IKEA,https://www.ikea.com/us/en/,home_retailer,furniture
+Home Depot,https://www.homedepot.com/,home_improvement,home improvement
+Lowe's,https://www.lowes.com/,home_improvement,home improvement
+Menards,https://www.menards.com/,home_improvement,home improvement
+Ace Hardware,https://www.acehardware.com/,home_improvement,hardware
+True Value,https://www.truevalue.com/,home_improvement,hardware
+Harbor Freight,https://www.harborfreight.com/,tools_retailer,tools
+Tractor Supply,https://www.tractorsupply.com/,farm_supply,farm and ranch
+Blain's Farm & Fleet,https://www.farmandfleet.com/,farm_supply,farm and home
+Fleet Farm,https://www.fleetfarm.com/,farm_supply,farm and home
+Williams Sonoma,https://www.williams-sonoma.com/,home_retailer,kitchen and home
+Pottery Barn,https://www.potterybarn.com/,home_retailer,furniture and home
+West Elm,https://www.westelm.com/,home_retailer,furniture and home
+Crate & Barrel,https://www.crateandbarrel.com/,home_retailer,furniture and home
+CB2,https://www.cb2.com/,home_retailer,furniture and home
+Rooms To Go,https://www.roomstogo.com/,home_retailer,furniture
+Ashley Furniture,https://www.ashleyfurniture.com/,home_retailer,furniture
+Lamps Plus,https://www.lampsplus.com/,home_retailer,lighting
+Best Buy,https://www.bestbuy.com/,electronics_retailer,electronics
+Newegg,https://www.newegg.com/,electronics_retailer,electronics marketplace
+B&H Photo,https://www.bhphotovideo.com/,electronics_retailer,photo and electronics
+Micro Center,https://www.microcenter.com/,electronics_retailer,electronics
+Adorama,https://www.adorama.com/,electronics_retailer,photo and electronics
+Crutchfield,https://www.crutchfield.com/,electronics_retailer,electronics
+Dell,https://www.dell.com/en-us,computer_retailer,computers
+HP,https://www.hp.com/us-en/shop,computer_retailer,computers
+Lenovo,https://www.lenovo.com/us/en/,computer_retailer,computers
+Acer,https://www.acer.com/us-en,computer_retailer,computers
+ASUS,https://www.asus.com/us/,computer_retailer,computers
+Samsung,https://www.samsung.com/us/,electronics_retailer,electronics
+Apple,https://www.apple.com/store,electronics_retailer,electronics
+Microsoft Store,https://www.microsoft.com/en-us/store/b/shop-all,electronics_retailer,electronics
+Ulta Beauty,https://www.ulta.com/,beauty_retailer,beauty
+Sephora,https://www.sephora.com/,beauty_retailer,beauty
+Bath & Body Works,https://www.bathandbodyworks.com/,beauty_retailer,beauty
+Sally Beauty,https://www.sallybeauty.com/,beauty_retailer,beauty supply
+Dermstore,https://www.dermstore.com/,beauty_retailer,beauty
+FragranceNet,https://www.fragrancenet.com/,beauty_retailer,fragrance
+iHerb,https://www.iherb.com/,health_retailer,supplements
+Vitacost,https://www.vitacost.com/,health_retailer,supplements
+Swanson Vitamins,https://www.swansonvitamins.com/,health_retailer,supplements
+GNC,https://www.gnc.com/,health_retailer,supplements
+Vitamin Shoppe,https://www.vitaminshoppe.com/,health_retailer,supplements
+Chewy,https://www.chewy.com/,pet_retailer,pet supplies
+PetSmart,https://www.petsmart.com/,pet_retailer,pet supplies
+Petco,https://www.petco.com/,pet_retailer,pet supplies
+PetFlow,https://www.petflow.com/,pet_retailer,pet supplies
+Pet Supermarket,https://www.petsupermarket.com/,pet_retailer,pet supplies
+Pet Supplies Plus,https://www.petsuppliesplus.com/,pet_retailer,pet supplies
+Bass Pro Shops,https://www.basspro.com/,outdoor_retailer,outdoor
+Cabela's,https://www.cabelas.com/,outdoor_retailer,outdoor
+DICK'S Sporting Goods,https://www.dickssportinggoods.com/,sporting_goods,sporting goods
+Academy Sports,https://www.academy.com/,sporting_goods,sporting goods
+REI,https://www.rei.com/,outdoor_retailer,outdoor
+Backcountry,https://www.backcountry.com/,outdoor_retailer,outdoor
+Evo,https://www.evo.com/,outdoor_retailer,outdoor sports
+Sportsman's Warehouse,https://www.sportsmans.com/,outdoor_retailer,outdoor
+MidwayUSA,https://www.midwayusa.com/,outdoor_retailer,outdoor sporting goods
+OpticsPlanet,https://www.opticsplanet.com/,outdoor_retailer,optics and outdoor
+AutoZone,https://www.autozone.com/,auto_parts_retailer,auto parts
+Advance Auto Parts,https://shop.advanceautoparts.com/,auto_parts_retailer,auto parts
+O'Reilly Auto Parts,https://www.oreillyauto.com/,auto_parts_retailer,auto parts
+RockAuto,https://www.rockauto.com/,auto_parts_retailer,auto parts
+CarParts.com,https://www.carparts.com/,auto_parts_retailer,auto parts
+Summit Racing,https://www.summitracing.com/,auto_parts_retailer,auto parts
+JEGS,https://www.jegs.com/,auto_parts_retailer,auto parts
+Tire Rack,https://www.tirerack.com/,auto_parts_retailer,tires and wheels
+4 Wheel Parts,https://www.4wheelparts.com/,auto_parts_retailer,offroad parts
+Motosport,https://www.motosport.com/,powersports_retailer,powersports parts
+Barnes & Noble,https://www.barnesandnoble.com/,book_retailer,books
+Books-A-Million,https://www.booksamillion.com/,book_retailer,books
+Hobby Lobby,https://www.hobbylobby.com/,craft_retailer,crafts
+Michaels,https://www.michaels.com/,craft_retailer,crafts
+JOANN,https://www.joann.com/,craft_retailer,crafts
+Blick Art Materials,https://www.dickblick.com/,art_supply_retailer,art supplies
+LEGO,https://www.lego.com/en-us, toy_retailer,toys
+Hasbro Pulse,https://www.hasbropulse.com/,toy_retailer,toys
+Entertainment Earth,https://www.entertainmentearth.com/,toy_retailer,collectibles
+BigBadToyStore,https://www.bigbadtoystore.com/,toy_retailer,collectibles
+Funko,https://funko.com/,toy_retailer,collectibles
+GameStop,https://www.gamestop.com/,gaming_retailer,games
+eBay,https://www.ebay.com/,marketplace,marketplace
+Etsy,https://www.etsy.com/,marketplace,marketplace
+Mercari,https://www.mercari.com/,marketplace,marketplace
+Oriental Trading,https://www.orientaltrading.com/,party_wholesale,party and bulk goods
+Candy Warehouse,https://www.candywarehouse.com/,candy_wholesale,candy bulk
+Nuts.com,https://nuts.com/,food_retailer,bulk food
+Bulk Apothecary,https://www.bulkapothecary.com/,wholesale_b2b,bulk ingredients
+Wholesale Supplies Plus,https://www.wholesalesuppliesplus.com/,wholesale_b2b,soap and cosmetic supplies
+Berlin Packaging,https://www.berlinpackaging.com/,packaging_distributor,packaging
+Paper Mart,https://www.papermart.com/,packaging_distributor,packaging
+Nashville Wraps,https://www.nashvillewraps.com/,packaging_distributor,packaging
+SKS Bottle,https://www.sks-bottle.com/,packaging_distributor,packaging
+Container and Packaging,https://www.containerandpackaging.com/,packaging_distributor,packaging
+ULine Packaging,https://www.uline.com/Cls_04/Boxes-Corrugated,packaging_distributor,packaging category
+Medline,https://www.medline.com/,medical_distributor,medical supplies
+Henry Schein,https://www.henryschein.com/us-en/medical/default.aspx,medical_distributor,medical supplies
+McKesson Medical-Surgical,https://mms.mckesson.com/,medical_distributor,medical supplies
+Bound Tree,https://www.boundtree.com/,medical_distributor,EMS supplies
+School Specialty,https://www.schoolspecialty.com/,education_distributor,school supplies
+Discount School Supply,https://www.discountschoolsupply.com/,education_distributor,school supplies
+Lakeshore Learning,https://www.lakeshorelearning.com/,education_retailer,education supplies
+Really Good Stuff,https://www.reallygoodstuff.com/,education_retailer,education supplies
+Oriental Trading Education,https://www.orientaltrading.com/teaching-supplies-a1-550055.fltr,education_distributor,teaching supplies category
+VistaPrint,https://www.vistaprint.com/,print_retailer,custom products
+4imprint,https://www.4imprint.com/,promo_distributor,promotional products
+DiscountMugs,https://www.discountmugs.com/,promo_distributor,promotional products
+EverythingBranded,https://www.everythingbranded.com/,promo_distributor,promotional products
+Restaurant Depot,https://www.restaurantdepot.com/,foodservice_distributor,foodservice distributor
+Sysco,https://www.sysco.com/,foodservice_distributor,foodservice distributor
+US Foods,https://www.usfoods.com/,foodservice_distributor,foodservice distributor
+Gordon Food Service,https://gfsstore.com/,foodservice_retailer,foodservice store
+Smart Foodservice,https://www.chefstore.com/,foodservice_retailer,foodservice store

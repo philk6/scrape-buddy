@@ -1,9 +1,14 @@
-# strategies/__init__.py
-#
-# Public interface for the strategy system.
-# Import run_best_strategy from here — don't import from the individual strategy
-# files directly, so the router stays as the single decision point.
+"""Public interface for the strategy system.
 
-from .router import run_best_strategy
+Keep this package import lightweight. Tests and utility modules should be able
+to import strategies.product_quality without loading scraper/network deps.
+"""
 
 __all__ = ["run_best_strategy"]
+
+
+def __getattr__(name):
+    if name == "run_best_strategy":
+        from .router import run_best_strategy
+        return run_best_strategy
+    raise AttributeError(name)

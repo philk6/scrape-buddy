@@ -31,17 +31,38 @@ Public API:
 """
 
 import logging
+import os
 import re
 
 from . import structured_extractor
 from . import llm_extractor
 from .row_extractor import extract_products_from_page as extract_structured_rows
 from .pagination import crawl_listing_pages, dedup_products
+from .product_quality import build_quality_report, normalize_products
 
 logger = logging.getLogger(__name__)
 
 # Minimum products to consider a tier successful
 MIN_PRODUCTS = 2
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, ""))
+        return value if value > 0 else default
+    except ValueError:
+        return default
+
+
+def _playwright_wait_plan() -> list[int]:
+    if os.environ.get("SCRAPEBUDDY_BENCHMARK_MODE"):
+        wait_ms = _positive_int_env("SCRAPEBUDDY_PLAYWRIGHT_WAIT_MS", 2000)
+        return [wait_ms]
+    wait_ms = os.environ.get("SCRAPEBUDDY_PLAYWRIGHT_WAIT_MS")
+    if wait_ms:
+        first = _positive_int_env("SCRAPEBUDDY_PLAYWRIGHT_WAIT_MS", 5000)
+        return [first, min(first * 2, 12_000)]
+    return [5000, 8000]
 
 
 def _has_product_content(html: str) -> bool:
@@ -112,6 +133,7 @@ def _result(
     reason: str,
 ) -> dict:
     """Build the standard result dict."""
+    products = normalize_products(products)
     # Clean _source from products before returning (internal metadata)
     clean_products = []
     for p in products:
@@ -129,12 +151,17 @@ def _result(
         f"sku={has_sku} upc={has_upc}"
     )
 
+    diagnostics = build_quality_report(clean_products, strategy_name=strategy_name)
+    for warning in diagnostics.get("warnings", []):
+        logger.warning(f"[Pipeline] Quality warning: {warning}")
+
     return {
         "strategy_id": {"tier1": 10, "tier1.5": 11, "tier2": 20, "tier3": 30}.get(tier, 0),
         "strategy_name": strategy_name,
         "reason": reason,
         "products": clean_products,
         "tier": tier,
+        "diagnostics": diagnostics,
     }
 
 
@@ -202,7 +229,7 @@ def run_pipeline(html: str, url: str, use_playwright: bool = False) -> dict:
             "[Pipeline] No product data in static HTML — "
             "trying Playwright rendering before extraction"
         )
-        for wait_ms in [5000, 8000]:
+        for wait_ms in _playwright_wait_plan():
             pw_html = _try_playwright_render(url, wait_ms=wait_ms)
             if pw_html is None:
                 logger.info("[Pipeline] Playwright unavailable")
@@ -231,7 +258,7 @@ def run_pipeline(html: str, url: str, use_playwright: bool = False) -> dict:
                 "[Pipeline] All tiers failed on static HTML — "
                 "trying Playwright as last resort"
             )
-            for wait_ms in [5000, 8000]:
+            for wait_ms in _playwright_wait_plan():
                 pw_html = _try_playwright_render(url, wait_ms=wait_ms)
                 if pw_html is None:
                     break

@@ -26,13 +26,45 @@ Planned future strategies:
 """
 
 import logging
+import os
 import re
 from . import listing, detail
 from .detail import count_product_links, enrich_from_detail_pages
 from .page_classifier import classify as classify_page
+from .product_quality import build_quality_report, normalize_products
 # universal_pipeline import is lazy — see _run() — to keep startup fast
 
 logger = logging.getLogger(__name__)
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, ""))
+        return value if value > 0 else default
+    except ValueError:
+        return default
+
+
+def _playwright_wait_plan() -> list[int]:
+    if os.environ.get("SCRAPEBUDDY_BENCHMARK_MODE"):
+        wait_ms = _positive_int_env("SCRAPEBUDDY_PLAYWRIGHT_WAIT_MS", 2000)
+        return [wait_ms]
+    wait_ms = os.environ.get("SCRAPEBUDDY_PLAYWRIGHT_WAIT_MS")
+    if wait_ms:
+        first = _positive_int_env("SCRAPEBUDDY_PLAYWRIGHT_WAIT_MS", 5000)
+        return [first, min(first * 2, 12_000)]
+    return [5000, 8000]
+
+
+def _finalize_result_dict(result: dict) -> dict:
+    """Normalize products and attach a reusable quality report."""
+    products = normalize_products(result.get("products", []))
+    result["products"] = products
+    result["diagnostics"] = build_quality_report(
+        products,
+        strategy_name=result.get("strategy_name", ""),
+    )
+    return result
 
 
 def _static_html_has_product_content(html: str) -> bool:
@@ -165,7 +197,7 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
         f"(confidence={page_type.confidence:.0%}, reason: {page_type.reason})"
     )
 
-    if page_type == "login_required":
+    if page_type.type == "login_required":
         logger.warning("[Router] Page requires login — cannot scrape without authentication")
         return {
             "strategy_id":   0,
@@ -184,8 +216,8 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
     playwright_attempted = False
     static_has_products = _static_html_has_product_content(html)
 
-    if page_type == "js_app" or not static_has_products:
-        trigger = "js_app classification" if page_type == "js_app" else "no product data in static HTML"
+    if page_type.type == "js_app" or not static_has_products:
+        trigger = "js_app classification" if page_type.type == "js_app" else "no product data in static HTML"
         logger.info(
             f"[Router] Escalating to Playwright — trigger: {trigger} "
             f"(static_has_products={static_has_products})"
@@ -196,7 +228,7 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
         # Try with progressively longer waits. KnockoutJS/Angular sites
         # need time to: (1) download the framework, (2) fetch API data,
         # (3) render the DOM. 3 seconds is rarely enough.
-        for wait_ms in [5000, 8000]:
+        for wait_ms in _playwright_wait_plan():
             js_html = _try_playwright_render(url, wait_ms=wait_ms)
             if js_html is None:
                 logger.info("[Router] Playwright unavailable — skipping JS rendering")
@@ -237,7 +269,7 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
     # Set classification_confident AFTER any Playwright re-classification
     classification_confident = page_type.confidence >= MIN_CLASSIFICATION_CONFIDENCE
 
-    if page_type == "detail_page":
+    if page_type.type == "detail_page":
         logger.info(
             f"[Router] URL classified as detail_page "
             f"(confidence={page_type.confidence:.0%}) — "
@@ -253,15 +285,51 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
     # because Strategy 1 uses the explicit column structure (row_extractor) to
     # extract images, SKUs, prices, and the correct product-detail links directly
     # from the structured layout.
+    # Universal pipeline first: it combines structured data, B2B row/table
+    # extraction, generic cards, LLM fallback, Playwright rendering, and
+    # pagination. Legacy strategies remain below as fallback paths.
+    universal_result = None
+    pipeline_result = None
+    try:
+        from .universal_pipeline import run_pipeline as run_universal_pipeline
+        universal_result = run_universal_pipeline(
+            html, url, use_playwright=playwright_attempted or use_playwright
+        )
+        universal_products = universal_result.get("products", [])
+        universal_min = 1 if page_type.type == "detail_page" else STRATEGY_1_MIN_RESULTS
+        if len(universal_products) >= universal_min:
+            urls_present = sum(1 for p in universal_products if p.get("product_url"))
+            if urls_present:
+                logger.info(
+                    f"[Router] Universal pipeline found {len(universal_products)} "
+                    f"product(s); enriching {urls_present} detail URL(s)"
+                )
+                try:
+                    universal_products = enrich_from_detail_pages(universal_products)
+                    universal_result["reason"] = (
+                        universal_result.get("reason", "")
+                        + f"; detail pages enriched {urls_present} product(s)"
+                    ).strip("; ")
+                except Exception as e:
+                    logger.warning(f"[Router] Universal detail enrichment failed: {e}")
+            universal_result["products"] = universal_products
+            return _finalize_result_dict(universal_result)
+        logger.info(
+            f"[Router] Universal pipeline returned {len(universal_products)} "
+            f"product(s); keeping legacy fallbacks available"
+        )
+    except Exception as e:
+        logger.warning(f"[Router] Universal pipeline failed; falling back: {e}")
+
     product_link_count = count_product_links(html, url)
     logger.info(f"[Router] Found {product_link_count} product detail link(s) on the listing page")
 
     should_fast_track_to_detail = (
         product_link_count >= PRODUCTS_LINK_THRESHOLD
-        and page_type != "row_catalog"
+        and page_type.type != "row_catalog"
         and (
-            page_type == "detail_page"
-            or (page_type == "listing_grid" and classification_confident)
+            page_type.type == "detail_page"
+            or (page_type.type == "listing_grid" and classification_confident)
         )
     )
 
@@ -288,7 +356,7 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
             f"Falling back to Strategy 1."
         )
         logger.warning(f"[Router] Strategy 2 found links but returned no products — falling back")
-    elif product_link_count >= PRODUCTS_LINK_THRESHOLD and page_type != "row_catalog":
+    elif product_link_count >= PRODUCTS_LINK_THRESHOLD and page_type.type != "row_catalog":
         logger.info(
             f"[Router] {product_link_count} product link(s) detected, but page "
             f"classification confidence is only {page_type.confidence:.0%} "
@@ -351,15 +419,18 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
         f"[Router] Legacy strategies returned {len(products_s1)} + {len(products_s2)} products — "
         f"escalating to Universal Pipeline"
     )
-    from .universal_pipeline import run_pipeline as run_universal_pipeline
-    pipeline_result = run_universal_pipeline(html, url, use_playwright=playwright_attempted)
+    if universal_result is not None:
+        pipeline_result = universal_result
+    else:
+        from .universal_pipeline import run_pipeline as run_universal_pipeline
+        pipeline_result = run_universal_pipeline(html, url, use_playwright=playwright_attempted)
 
     if pipeline_result.get("products"):
         logger.info(
             f"[Router] Universal Pipeline succeeded — "
             f"{len(pipeline_result['products'])} product(s) via {pipeline_result.get('tier', '?')}"
         )
-        return pipeline_result
+        return _finalize_result_dict(pipeline_result)
 
     # ── Nothing worked anywhere — return best partial result ──────────────────
     best_products = products_s1 or products_s2 or pipeline_result.get("products", [])
@@ -379,6 +450,7 @@ def _result(strategy: dict, products: list, reason: str) -> dict:
     Logs a structured scrape-summary line for every completed run.
     """
     # ── Per-scrape summary logging ─────────────────────────────────────────
+    products = normalize_products(products)
     has_name     = sum(1 for p in products if p.get("product_name"))
     has_price    = sum(1 for p in products if p.get("price"))
     has_url      = sum(1 for p in products if p.get("product_url"))
@@ -392,9 +464,13 @@ def _result(strategy: dict, products: list, reason: str) -> dict:
         f"name={has_name} price={has_price} url={has_url} "
         f"image={has_image} sku={has_sku} upc={has_upc}"
     )
+    diagnostics = build_quality_report(products, strategy_name=strategy["name"])
+    for warning in diagnostics.get("warnings", []):
+        logger.warning(f"[Router] Quality warning: {warning}")
     return {
         "strategy_id":   strategy["id"],
         "strategy_name": strategy["name"],
         "reason":        reason,
         "products":      products,
+        "diagnostics":   diagnostics,
     }

@@ -20,6 +20,7 @@ Future versions can add: Playwright for JS-rendered pages, JSON-LD/microdata
 parsing, site-specific extractors, and pagination support.
 """
 
+import os
 import re
 import requests
 from bs4 import BeautifulSoup
@@ -37,6 +38,35 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
 }
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, "").strip())
+        return value if value > 0 else default
+    except Exception:
+        return default
+
+
+def _request_timeout() -> int:
+    return _positive_int_env("SCRAPEBUDDY_REQUEST_TIMEOUT", 15)
+
+
+def _playwright_nav_timeout_ms() -> int:
+    return _positive_int_env("SCRAPEBUDDY_PLAYWRIGHT_TIMEOUT_MS", 30_000)
+
+
+_DYNAMIC_EXPANSION_SELECTORS = [
+    "button:has-text('Load More')",
+    "button:has-text('Show More')",
+    "button:has-text('View More')",
+    "button:has-text('More Products')",
+    "a:has-text('Load More')",
+    "a:has-text('Show More')",
+    "a:has-text('View More')",
+    "[aria-label*='load more' i]",
+    "[aria-label*='show more' i]",
+]
 
 # Class name keywords used to identify product container elements
 PRODUCT_KEYWORDS = ["product", "item", "card", "listing", "tile", "result"]
@@ -92,7 +122,7 @@ def fetch_html(url: str) -> str:
     Fetch the HTML content of the given URL.
     Raises requests.RequestException on network/HTTP errors.
     """
-    response = requests.get(url, headers=HEADERS, timeout=15)
+    response = requests.get(url, headers=HEADERS, timeout=_request_timeout())
     response.raise_for_status()
     return response.text
 
@@ -132,7 +162,7 @@ def fetch_html_playwright(url: str, wait_ms: int = 3000, strict: bool = False) -
                 viewport={"width": 1920, "height": 1080},
             )
             page = context.new_page()
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.goto(url, wait_until="domcontentloaded", timeout=_playwright_nav_timeout_ms())
             # Wait for dynamic content to load
             page.wait_for_timeout(wait_ms)
             # Try to wait for common product selectors — covers grid layouts,
@@ -180,6 +210,7 @@ def fetch_html_playwright(url: str, wait_ms: int = 3000, strict: bool = False) -
             except Exception:
                 pass  # Not all pages match — don't block on this
 
+            _expand_dynamic_catalog(page, max_rounds=8)
             html = page.content()
             browser.close()
             return html
@@ -196,6 +227,83 @@ def fetch_html_playwright(url: str, wait_ms: int = 3000, strict: bool = False) -
 class PlaywrightUnavailableError(Exception):
     """Raised when strict=True and Playwright is not installed or fails to launch."""
     pass
+
+
+def _dynamic_page_signature(page) -> tuple[int, int, int]:
+    """Return a rough signature for rendered catalog growth."""
+    try:
+        return page.evaluate(
+            """() => {
+                const selectors = [
+                    '[class*="product"]',
+                    '[class*="item"]',
+                    '[class*="card"]',
+                    '[data-product-id]',
+                    '[data-item-id]',
+                    'tr'
+                ];
+                let count = 0;
+                for (const sel of selectors) {
+                    count = Math.max(count, document.querySelectorAll(sel).length);
+                }
+                return [document.body.innerText.length, count, document.body.scrollHeight];
+            }"""
+        )
+    except Exception:
+        return (0, 0, 0)
+
+
+def _expand_dynamic_catalog(page, max_rounds: int = 8) -> None:
+    """
+    Expand common dynamic catalog patterns before returning HTML.
+
+    Covers infinite scroll and "Load more" style catalogs. It is deliberately
+    bounded so a broken page cannot keep the scrape running forever.
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    stable_rounds = 0
+    previous = _dynamic_page_signature(page)
+
+    for round_no in range(1, max_rounds + 1):
+        clicked = False
+        for selector in _DYNAMIC_EXPANSION_SELECTORS:
+            try:
+                button = page.query_selector(selector)
+                if button and button.is_visible() and button.is_enabled():
+                    button.scroll_into_view_if_needed()
+                    button.click()
+                    clicked = True
+                    log.info(f"[scraper] Dynamic expansion clicked '{selector}'")
+                    break
+            except Exception:
+                continue
+
+        try:
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(900 if clicked else 600)
+        except Exception:
+            pass
+
+        current = _dynamic_page_signature(page)
+        grew = (
+            current[0] > previous[0] + 250
+            or current[1] > previous[1]
+            or current[2] > previous[2] + 500
+        )
+
+        if grew:
+            stable_rounds = 0
+            previous = current
+            log.info(
+                f"[scraper] Dynamic expansion round {round_no}: "
+                f"text={current[0]} candidates={current[1]} height={current[2]}"
+            )
+        else:
+            stable_rounds += 1
+            if stable_rounds >= 2:
+                break
 
 
 def make_auth_fetch_fn(cookies: list):
@@ -218,7 +326,7 @@ def make_auth_fetch_fn(cookies: list):
         )
 
     def _fetch(url: str) -> str:
-        response = session.get(url, headers=HEADERS, timeout=15)
+        response = session.get(url, headers=HEADERS, timeout=_request_timeout())
         response.raise_for_status()
         return response.text
 
@@ -1050,7 +1158,7 @@ def debug_scrape(url: str) -> dict:
 
     # --- Fetch ---
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15, allow_redirects=True)
+        response = requests.get(url, headers=HEADERS, timeout=_request_timeout(), allow_redirects=True)
         info["status_code"] = response.status_code
         info["final_url"] = response.url
         info["redirected"] = response.url != url

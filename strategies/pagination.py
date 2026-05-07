@@ -29,7 +29,7 @@ NOT used by:
 import logging
 import math
 import re
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -38,7 +38,7 @@ from strategies.detail import (
     _find_next_page,
     _try_next_page_by_url,
     _stabilise_shopify_sort,
-    MAX_LISTING_PAGES,
+    _runtime_limits,
 )
 
 
@@ -86,11 +86,24 @@ _RESULT_COUNT_RE = re.compile(
     re.IGNORECASE,
 )
 
+_RESULT_COUNT_FALLBACK_RE = re.compile(
+    r"(?:items?\s+|showing\s+)?"
+    r"([\d,]+)"
+    r"\s*(?:-|–|—|\u2013|to)\s*"
+    r"([\d,]+)"
+    r"\s+of\s+"
+    r"([\d,]+)",
+    re.IGNORECASE,
+)
+
 # Matches: "Page 1 of 3"
 _PAGE_OF_TOTAL_RE = re.compile(r"page\s+\d+\s+of\s+(\d+)", re.IGNORECASE)
 
 # Class/id fragments that indicate a pagination container
 _PAGINATION_CLASS_SIGNALS = ["pagination", "pager", "pages", "page-nav", "paginate"]
+_PAGE_PARAM_NAMES = [
+    "page", "p", "pg", "pageNumber", "page[number]", "currentPage",
+]
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -152,7 +165,7 @@ def _detect_pagination_info(soup: BeautifulSoup) -> dict:
     # Signal A: result-count text
     page_text = soup.get_text(separator=" ")
 
-    m = _RESULT_COUNT_RE.search(page_text)
+    m = _RESULT_COUNT_RE.search(page_text) or _RESULT_COUNT_FALLBACK_RE.search(page_text)
     if m:
         start  = int(m.group(1).replace(",", ""))
         end    = int(m.group(2).replace(",", ""))
@@ -273,6 +286,62 @@ def dedup_products(products: list) -> tuple:
     return deduped, removed
 
 
+def _page_url_candidates(
+    current_url: str,
+    target_page: int,
+    *,
+    current_page: int | None = None,
+    per_page: int | None = None,
+) -> list[str]:
+    """Generate common URL variants for numbered catalog pagination."""
+    parsed = urlparse(current_url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    candidates = []
+
+    existing_page_params = [name for name in _PAGE_PARAM_NAMES if name in params]
+    names = existing_page_params or _PAGE_PARAM_NAMES[:1]
+    for name in names:
+        next_params = dict(params)
+        next_params[name] = [str(target_page)]
+        candidates.append(
+            parsed._replace(query=urlencode(next_params, doseq=True)).geturl()
+        )
+
+    for name in ("offset", "start", "skip"):
+        if name in params:
+            try:
+                current_offset = int(params[name][0])
+                inferred_per_page = per_page
+                if not inferred_per_page and current_page and current_page > 1:
+                    inferred_per_page = current_offset // (current_page - 1)
+                if inferred_per_page:
+                    next_params = dict(params)
+                    next_params[name] = [str(inferred_per_page * (target_page - 1))]
+                    candidates.append(
+                        parsed._replace(query=urlencode(next_params, doseq=True)).geturl()
+                    )
+            except Exception:
+                pass
+
+    path = parsed.path or ""
+    path_patterns = (
+        (r"(/page/)\d+(/?)$", rf"\g<1>{target_page}\g<2>"),
+        (r"(/p/)\d+(/?)$", rf"\g<1>{target_page}\g<2>"),
+    )
+    for pattern, repl in path_patterns:
+        next_path = re.sub(pattern, repl, path, flags=re.IGNORECASE)
+        if next_path != path:
+            candidates.append(parsed._replace(path=next_path).geturl())
+
+    seen = set()
+    unique = []
+    for url in candidates:
+        if url not in seen:
+            unique.append(url)
+            seen.add(url)
+    return unique
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def crawl_listing_pages(
@@ -343,7 +412,9 @@ def crawl_listing_pages(
     page_num      = 0
     total_pages   = None   # filled in after page 1
 
-    while page_num < MAX_LISTING_PAGES:
+    _, max_listing_pages = _runtime_limits()
+
+    while page_num < max_listing_pages:
         page_num += 1
 
         page_label = (
@@ -425,8 +496,17 @@ def crawl_listing_pages(
 
         # ── Fallback: URL-based page increment when next link disappears ───────
         if not next_url and total_pages and page_num < total_pages:
-            candidate = _try_next_page_by_url(current_url, page_num + 1)
-            if candidate and candidate not in visited_pages:
+            candidate = None
+            for url_candidate in _page_url_candidates(
+                current_url,
+                page_num + 1,
+                current_page=page_num,
+                per_page=(locals().get("pag_info") or {}).get("per_page"),
+            ):
+                if url_candidate not in visited_pages:
+                    candidate = url_candidate
+                    break
+            if candidate:
                 logger.info(
                     f"[Pagination] No 'Next' link on page {page_num} but "
                     f"only {page_num}/{total_pages} pages visited — "
@@ -451,9 +531,9 @@ def crawl_listing_pages(
                 logger.info(f"[Pagination] No further pages after page {page_num} — {reason}")
             break
 
-        if page_num >= MAX_LISTING_PAGES:
+        if page_num >= max_listing_pages:
             logger.warning(
-                f"[Pagination] Safety cap of {MAX_LISTING_PAGES} pages reached — stopping"
+                f"[Pagination] Safety cap of {max_listing_pages} pages reached — stopping"
             )
             break
 

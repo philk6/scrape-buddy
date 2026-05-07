@@ -19,9 +19,10 @@ venv/
 *.db-journal
 
 # Logs
-*.log
+*.log
 # Cache
 cache/
+benchmark_results/
 
 # Sessions (Playwright browser state)
 sessions/

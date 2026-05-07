@@ -48,8 +48,23 @@ def _runtime_limits() -> tuple[int, int]:
     """Return detail/listing limits, with a lighter benchmark mode for validation runs."""
     benchmark_mode = os.getenv("SCRAPEBUDDY_BENCHMARK_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
     if benchmark_mode:
-        return BENCHMARK_MAX_DETAIL_PAGES, BENCHMARK_MAX_LISTING_PAGES
-    return MAX_DETAIL_PAGES, MAX_LISTING_PAGES
+        default_detail = BENCHMARK_MAX_DETAIL_PAGES
+        default_listing = BENCHMARK_MAX_LISTING_PAGES
+    else:
+        default_detail = MAX_DETAIL_PAGES
+        default_listing = MAX_LISTING_PAGES
+
+    detail_limit = _positive_int_env("SCRAPEBUDDY_DETAIL_LIMIT", default_detail)
+    listing_limit = _positive_int_env("SCRAPEBUDDY_LISTING_LIMIT", default_listing)
+    return detail_limit, listing_limit
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, "").strip())
+        return value if value > 0 else default
+    except Exception:
+        return default
 
 # Hard safety cap: max product detail pages to visit in one run.
 # Production/full runs can go high, but benchmark/test mode should stay lean.
@@ -743,7 +758,8 @@ _UPC_LABEL_KEYWORDS = [
 # Allows up to 30 chars of whitespace/punctuation between label and digits.
 _UPC_TEXT_RE = re.compile(
     r"(?:item\s+upc|product\s+upc|upc\s*code|upc\s*/\s*ean|"
-    r"universal\s+product\s+code|upc|ean|barcode|gtin)"
+    r"universal\s+product\s+code|product\s*id|barcode|"
+    r"gtin\s*14|gtin\s*13|gtin\s*12|gtin\s*8|gtin|ean|upc)"
     r"[:\s\-]{0,30}"
     r"(\d[\d\s]{6,15}\d)",   # 8–17 chars to allow internal spaces/hyphens
     re.IGNORECASE,
@@ -826,6 +842,97 @@ def _coerce_upc(raw: str) -> str:
     if re.fullmatch(r"\d{8,14}", digits):
         return digits
     return ""
+
+
+def _identifier_fields(identifier: str) -> dict:
+    """Return explicit UPC/EAN/GTIN fields for one normalized identifier."""
+    fields = {
+        "upc": identifier,
+        "ean": "",
+        "gtin": "",
+        "barcode_raw": identifier,
+        "identifier_type": "",
+    }
+    if not identifier:
+        return fields
+    if len(identifier) == 8:
+        fields["ean"] = identifier
+        fields["identifier_type"] = "ean8"
+    elif len(identifier) == 12:
+        fields["identifier_type"] = "upc"
+    elif len(identifier) == 13:
+        fields["ean"] = identifier
+        fields["identifier_type"] = "ean13"
+    elif len(identifier) == 14:
+        fields["gtin"] = identifier
+        fields["identifier_type"] = "gtin14"
+    else:
+        fields["identifier_type"] = "barcode"
+    return fields
+
+
+def _extract_identifier_from_detail(soup: BeautifulSoup, ld: dict) -> dict:
+    """Extract the strongest UPC/EAN/GTIN/barcode value from detail-page signals."""
+    # 1. JSON-LD Product schema.
+    for gtin_key in ["gtin14", "gtin13", "gtin12", "gtin8", "gtin", "productID"]:
+        raw = (ld.get(gtin_key) or "").strip()
+        identifier = _coerce_upc(raw)
+        if identifier:
+            logger.info(f"[Strategy 2] Identifier via JSON-LD ({gtin_key}) | value={identifier}")
+            fields = _identifier_fields(identifier)
+            fields["barcode_raw"] = raw or identifier
+            return fields
+
+    # 2. Meta/itemprop/name/property tags.
+    for meta_attrs in [
+        {"itemprop": "gtin14"},
+        {"itemprop": "gtin13"},
+        {"itemprop": "gtin12"},
+        {"itemprop": "gtin8"},
+        {"itemprop": "gtin"},
+        {"itemprop": "productID"},
+        {"name": "gtin14"},
+        {"name": "gtin13"},
+        {"name": "gtin12"},
+        {"name": "gtin8"},
+        {"name": "gtin"},
+        {"name": "ean"},
+        {"name": "upc"},
+        {"name": "barcode"},
+        {"property": "product:gtin"},
+        {"property": "product:upc"},
+        {"property": "product:ean"},
+    ]:
+        raw = _meta_content(soup, meta_attrs)
+        identifier = _coerce_upc(raw)
+        if identifier:
+            logger.info(f"[Strategy 2] Identifier via meta {meta_attrs} | value={identifier}")
+            fields = _identifier_fields(identifier)
+            fields["barcode_raw"] = raw or identifier
+            return fields
+
+    # 3. Visible label/value traversal.
+    identifier = _extract_upc(soup)
+    if identifier:
+        return _identifier_fields(identifier)
+
+    # 4. Embedded JSON / JS data.
+    raw = _extract_from_script_json(
+        soup,
+        [
+            "upc", "ean", "barcode", "productID", "productId",
+            "gtin", "gtin8", "gtin12", "gtin13", "gtin14",
+            "UPC", "EAN", "GTIN", "Barcode",
+        ],
+    )
+    identifier = _coerce_upc(raw)
+    if identifier:
+        logger.info(f"[Strategy 2] Identifier via script data | value={identifier}")
+        fields = _identifier_fields(identifier)
+        fields["barcode_raw"] = raw or identifier
+        return fields
+
+    return _identifier_fields("")
 
 
 def _extract_upc(soup: BeautifulSoup) -> str:
@@ -1238,47 +1345,21 @@ def _extract_from_detail_page(html: str, url: str) -> dict:
 
     # ── upc ───────────────────────────────────────────────────────────────────
     try:
-        upc = ""
-
-        # 1. JSON-LD gtin fields (most reliable when present)
-        for gtin_key in ["gtin13", "gtin12", "gtin", "gtin8"]:
-            raw = (ld.get(gtin_key) or "").strip()
-            upc = _coerce_upc(raw)
-            if upc:
-                logger.info(f"[Strategy 2] UPC via JSON-LD ({gtin_key}) | upc={upc}")
-                break
-
-        # 2. <meta> tags (itemprop / name attributes)
-        if not upc:
-            for meta_attrs in [
-                {"itemprop": "gtin13"},
-                {"itemprop": "gtin12"},
-                {"itemprop": "gtin"},
-                {"name": "upc"},
-            ]:
-                raw = _meta_content(soup, meta_attrs)
-                upc = _coerce_upc(raw)
-                if upc:
-                    logger.info(f"[Strategy 2] UPC via meta {meta_attrs} | upc={upc}")
-                    break
-
-        # 3. Page-level extraction (regex + element traversal with UPC validation)
-        if not upc:
-            upc = _extract_upc(soup)
-
-        # 4. Script-tag JSON fallback (KnockoutJS / embedded view-model data)
-        if not upc:
-            raw = _extract_from_script_json(
-                soup, ["upc", "gtin", "gtin12", "gtin13", "ean"]
-            )
-            upc = _coerce_upc(raw)
-            if upc:
-                logger.info(f"[Strategy 2] UPC via script-JSON | upc={upc}")
+        identifier_fields = _extract_identifier_from_detail(soup, ld)
+        upc = identifier_fields.get("upc", "")
+        ean = identifier_fields.get("ean", "")
+        gtin = identifier_fields.get("gtin", "")
+        barcode_raw = identifier_fields.get("barcode_raw", "")
+        identifier_type = identifier_fields.get("identifier_type", "")
 
         if upc:
             extracted["upc"] = True
     except Exception:
         upc = ""
+        ean = ""
+        gtin = ""
+        barcode_raw = ""
+        identifier_type = ""
 
     # ── price ─────────────────────────────────────────────────────────────────
     try:
@@ -1531,6 +1612,10 @@ def _extract_from_detail_page(html: str, url: str) -> dict:
         "image_url":         image_url,
         "product_url":       url,
         "gtin_case":         gtin_case,
+        "ean":               ean,
+        "gtin":              gtin,
+        "barcode_raw":       barcode_raw,
+        "identifier_type":   identifier_type,
     }
 
 
@@ -1612,9 +1697,12 @@ def _try_next_page_by_url(current_url: str, target_page: int) -> str | None:
     try:
         parsed = urlparse(current_url)
         params = parse_qs(parsed.query, keep_blank_values=True)
+        for name in ("page", "p", "pg", "pageNumber", "page[number]", "currentPage"):
+            if name in params:
+                params[name] = [str(target_page)]
+                return parsed._replace(query=urlencode(params, doseq=True)).geturl()
         params["page"] = [str(target_page)]
-        new_query = urlencode(params, doseq=True)
-        return parsed._replace(query=new_query).geturl()
+        return parsed._replace(query=urlencode(params, doseq=True)).geturl()
     except Exception:
         return None
 
