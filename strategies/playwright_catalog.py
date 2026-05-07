@@ -952,21 +952,74 @@ def _get_content_fingerprint(page, selector: str | None) -> str:
     """
     Return a short string that represents the current product grid content.
 
-    Built from the text of the first 3 elements matching `selector`.
+    Built from the text of the first 3 elements matching `selector`, or from
+    product-ish links/images when no stable card selector was found.
     Used to confirm that a pagination click actually changed the displayed items
     (prevents silent infinite loops when clicks land on the same page).
 
-    Returns "" if selector is None or the page evaluation fails.
+    Returns "" if the page evaluation fails or no usable product signal exists.
     """
-    if not selector:
-        return ""
     try:
         return page.evaluate(
             """(sel) => {
-                const els = Array.from(document.querySelectorAll(sel));
-                return els.slice(0, 3)
-                          .map(el => (el.textContent || '').trim().slice(0, 100))
-                          .join('||');
+                if (sel) {
+                    const els = Array.from(document.querySelectorAll(sel));
+                    const textSig = els.slice(0, 3)
+                        .map(el => (el.textContent || '').trim().slice(0, 100))
+                        .filter(Boolean)
+                        .join('||');
+                    if (textSig) return textSig;
+                }
+
+                const bad = [
+                    '/about', '/account', '/basket', '/cart', '/category',
+                    '/categories', '/checkout', '/collection', '/collections',
+                    '/contact', '/customer', '/faq', '/help', '/login',
+                    '/policy', '/privacy', '/register', '/search', '/signin',
+                    '/signup', '/terms', '/users', '/wishlist'
+                ];
+                const media = /\\.(?:avif|bmp|css|gif|ico|jpe?g|js|pdf|png|svg|webp)$/i;
+                const strong = [
+                    '/products/', '/product/', '/item/', '/p/', '/pd/', '/dp/',
+                    'product_detail', 'productdetail', 'product-detail',
+                    'itemdetail', 'item-detail', 'item_detail'
+                ];
+                const productish = (href) => {
+                    let u;
+                    try { u = new URL(href, document.location.href); }
+                    catch { return false; }
+                    const full = u.href.toLowerCase();
+                    if (media.test(u.pathname) || bad.some(token => full.includes(token))) {
+                        return false;
+                    }
+                    if (strong.some(token => full.includes(token))) return true;
+                    const slug = decodeURIComponent(u.pathname || '')
+                        .replace(/^\\/+|\\/+$/g, '')
+                        .toLowerCase();
+                    return Boolean(
+                        slug &&
+                        !slug.includes('/') &&
+                        slug.length >= 12 &&
+                        slug.includes('-') &&
+                        /[a-z][a-z0-9-]*\\d[a-z0-9-]*$/.test(slug)
+                    );
+                };
+
+                const linkSig = Array.from(document.querySelectorAll('a[href]'))
+                    .filter(a => productish(a.getAttribute('href') || ''))
+                    .slice(0, 20)
+                    .map(a => {
+                        const href = new URL(a.getAttribute('href'), document.location.href).href;
+                        const text = (a.textContent || '').trim().slice(0, 60);
+                        return `${href}|${text}`;
+                    })
+                    .join('||');
+                if (linkSig) return linkSig;
+
+                return Array.from(document.querySelectorAll('img[src*="product"], img[src*="item"]'))
+                    .slice(0, 20)
+                    .map(img => img.getAttribute('src') || '')
+                    .join('||');
             }""",
             selector,
         ) or ""
@@ -1032,6 +1085,7 @@ def _try_candidate_page_urls(
     base_netloc: str,
     previous_fingerprint: str,
     winning_selector: str | None,
+    seen_fingerprints: set[str] | None = None,
 ) -> bool:
     current_url = page.url
     for candidate in _candidate_page_urls(current_url, target_page):
@@ -1047,6 +1101,17 @@ def _try_candidate_page_urls(
             new_fingerprint = _get_content_fingerprint(page, winning_selector)
             html = page.content()
             links = _collect_product_links(html, candidate)
+            if (
+                links
+                and new_fingerprint
+                and seen_fingerprints
+                and new_fingerprint in seen_fingerprints
+            ):
+                logger.info(
+                    f"[Strategy 3] URL-pattern pagination rejected page {target_page}: "
+                    "content was already seen"
+                )
+                continue
             if (
                 links
                 and (
@@ -1284,6 +1349,32 @@ def _detect_pagination_info(page) -> dict:
     return info
 
 
+def _navigation_exhausted_reason(total_pages: int | None, page_num: int) -> str:
+    if total_pages and page_num > total_pages:
+        return (
+            f"navigation exhausted after {page_num} page(s); "
+            f"detected estimate was {total_pages}"
+        )
+    if total_pages and page_num < total_pages:
+        return f"no navigation path found after page {page_num}"
+    if total_pages:
+        return f"all {total_pages} expected page(s) visited; no further navigation found"
+    return f"navigation exhausted after page {page_num}"
+
+
+def _detail_enrichment_count_cap(
+    total_products: int | None,
+    total_pages: int | None,
+    pages_visited: int,
+    candidate_count: int,
+) -> int | None:
+    if not total_products or candidate_count <= total_products:
+        return None
+    if total_pages and pages_visited > total_pages:
+        return None
+    return total_products
+
+
 def _click_numbered_page(page, target_page: int, winning_selector: str | None) -> bool:
     """
     Find and click the numbered pagination button for `target_page`.
@@ -1294,9 +1385,9 @@ def _click_numbered_page(page, target_page: int, winning_selector: str | None) -
         is the target page number, and calls .click() on it.
 
     Approach 2 — JS evaluate fallback:
-        If no Playwright element was found, runs a document.querySelectorAll
-        over the whole page and clicks the first visible matching element
-        via JavaScript.
+        If no Playwright element was found, clicks only inside pagination-like
+        containers or elements with explicit page attributes so product links
+        and SKUs are not mistaken for page buttons.
 
     After clicking, waits for network-idle / render to settle.
     Returns True if a click was performed, False if no button was found.
@@ -1356,31 +1447,69 @@ def _click_numbered_page(page, target_page: int, winning_selector: str | None) -
     # ── Approach 2: JS evaluate fallback ─────────────────────────────────────
     try:
         clicked = page.evaluate(
-            """(target) => {
+            """({target, containerSelectors}) => {
                 const targetStr = String(target);
-                const all = Array.from(
-                    document.querySelectorAll('a, button, li, span')
-                );
-                const matches = (el) => {
+                const interactiveSelector = [
+                    'a', 'button', 'li', 'span', '[role="button"]',
+                    '[data-page]', '[data-page-number]'
+                ].join(',');
+                const candidateRecords = [];
+                const seen = new Set();
+                const pushCandidate = (el, inContainer) => {
+                    if (!el || seen.has(el)) return;
+                    seen.add(el);
+                    candidateRecords.push({el, inContainer});
+                };
+
+                for (const selector of containerSelectors) {
+                    for (const container of document.querySelectorAll(selector)) {
+                        pushCandidate(container, true);
+                        for (const el of container.querySelectorAll(interactiveSelector)) {
+                            pushCandidate(el, true);
+                        }
+                    }
+                }
+
+                for (const el of document.querySelectorAll([
+                    '[data-page]', '[data-page-number]',
+                    '[aria-label*="page" i]', '[title*="page" i]',
+                    '[data-testid*="page" i]', '[data-testid*="pagination" i]',
+                    '[data-testid*="pager" i]'
+                ].join(','))) {
+                    pushCandidate(el, false);
+                }
+
+                const attrMatches = (attrs) => {
+                    const haystack = attrs.join(' ').trim().toLowerCase();
+                    if (!haystack) return false;
+                    if (haystack === targetStr) return true;
+                    const pagePattern = new RegExp(`(?:^|\\\\b)page\\\\s*${targetStr}(?:\\\\b|$)`, 'i');
+                    if (pagePattern.test(haystack)) return true;
+                    return haystack.split(/\\D+/).filter(Boolean).includes(targetStr);
+                };
+                const matches = ({el, inContainer}) => {
                     const text = (el.textContent || '').trim();
-                    if (text === targetStr) return true;
                     const attrs = [
                         'aria-label', 'title', 'data-page',
                         'data-page-number', 'data-testid', 'value'
-                    ].map(name => el.getAttribute(name) || '').join(' ');
-                    const haystack = `${text} ${attrs}`.trim().toLowerCase();
-                    return haystack.split(/\\D+/).filter(Boolean).includes(targetStr);
+                    ].map(name => el.getAttribute(name) || '');
+                    if (inContainer && text === targetStr) return true;
+                    return attrMatches(attrs);
                 };
-                for (const el of all) {
+                for (const record of candidateRecords) {
+                    const el = record.el;
                     // offsetParent !== null means the element is visible
-                    if (matches(el) && el.offsetParent !== null) {
+                    if (matches(record) && el.offsetParent !== null) {
                         el.click();
                         return true;
                     }
                 }
                 return false;
             }""",
-            target_page,
+            {
+                "target": target_page,
+                "containerSelectors": _PAGINATION_CONTAINER_SELECTORS,
+            },
         )
         if clicked:
             try:
@@ -1747,6 +1876,7 @@ def _run_inner(page, listing_url: str) -> list:
 
     all_product_links: list    = []
     seen_links:        set     = set()
+    seen_fingerprints: set[str] = set()
     all_card_products: list    = []
 
     # winning_selector from page 1 is used for content fingerprinting on later
@@ -2016,15 +2146,16 @@ def _run_inner(page, listing_url: str) -> list:
 
         # ── Have we visited all known pages? ──────────────────────────────────
         if total_pages is not None and page_num >= total_pages:
-            stop_reason = f"all {total_pages} page(s) visited"
+            # Detected page counts are advisory; still probe navigation below.
             logger.info(
-                f"[Strategy 3] All {total_pages} page(s) scraped — "
-                f"pagination complete"
+                f"[Strategy 3] Reached detected page count ({total_pages}); "
+                "checking for additional navigation before stopping"
             )
-            break
 
         # ── Navigate to next page (three-layer fallback) ──────────────────────
         fingerprint_before = _get_content_fingerprint(page, winning_selector)
+        if fingerprint_before:
+            seen_fingerprints.add(fingerprint_before)
 
         # Layer 1 & 2: URL-based next link / "Next" button click
         navigated = _follow_next_page(page, visited_pages, base_netloc)
@@ -2032,11 +2163,10 @@ def _run_inner(page, listing_url: str) -> list:
         # Layer 3: Numbered page button (for SPAs like Sysco)
         if not navigated:
             target_page = page_num + 1
-            if total_pages is None or target_page <= total_pages:
-                navigated = _click_numbered_page(
-                    page, target_page, winning_selector
-                )
-            if not navigated and total_pages is not None and target_page <= total_pages:
+            navigated = _click_numbered_page(
+                page, target_page, winning_selector
+            )
+            if not navigated:
                 navigated = _try_candidate_page_urls(
                     page,
                     target_page,
@@ -2044,13 +2174,11 @@ def _run_inner(page, listing_url: str) -> list:
                     base_netloc,
                     fingerprint_before,
                     winning_selector,
+                    seen_fingerprints,
                 )
 
         if not navigated:
-            if total_pages and page_num < total_pages:
-                stop_reason = f"no navigation path found after page {page_num}"
-            else:
-                stop_reason = f"navigation exhausted after page {page_num}"
+            stop_reason = _navigation_exhausted_reason(total_pages, page_num)
             logger.info(
                 f"[Strategy 3] No navigation path found after page {page_num} — "
                 f"pagination complete"
@@ -2073,6 +2201,17 @@ def _run_inner(page, listing_url: str) -> list:
                 f"This may mean the last real page was page {page_num}."
             )
             break
+
+        if fingerprint_after and fingerprint_after in seen_fingerprints:
+            stop_reason = f"content repeated after navigating from page {page_num}"
+            logger.warning(
+                f"[Strategy 3] Content repeated after navigating from "
+                f"page {page_num} — stopping to prevent pagination loop."
+            )
+            break
+
+        if fingerprint_after:
+            seen_fingerprints.add(fingerprint_after)
 
     # ── Listing crawl summary ─────────────────────────────────────────────────
     if not stop_reason:
@@ -2132,13 +2271,25 @@ def _run_inner(page, listing_url: str) -> list:
 
         enrich_links = detail_link_pool
 
-        if total_products and len(enrich_links) > total_products:
+        detail_count_cap = _detail_enrichment_count_cap(
+            total_products,
+            total_pages,
+            page_num,
+            len(enrich_links),
+        )
+        if detail_count_cap:
             logger.info(
                 f"[Strategy 3] Detail enrichment candidate pool "
                 f"({len(enrich_links)}) exceeds visible product count "
-                f"({total_products}); capping to first {total_products} link(s)"
+                f"({detail_count_cap}); capping to first {detail_count_cap} link(s)"
             )
-            enrich_links = enrich_links[:total_products]
+            enrich_links = enrich_links[:detail_count_cap]
+        elif total_products and total_pages and page_num > total_pages:
+            logger.info(
+                f"[Strategy 3] Detected product count ({total_products}) appears "
+                f"low after visiting {page_num} page(s); not capping "
+                f"{len(enrich_links)} detail enrichment candidate(s)"
+            )
 
         if len(enrich_links) > AUTH_DETAIL_ENRICH_LIMIT:
             logger.info(

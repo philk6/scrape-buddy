@@ -3,8 +3,10 @@ import unittest
 from strategies.playwright_catalog import (
     _api_object_to_product,
     _candidate_page_urls,
+    _detail_enrichment_count_cap,
     _looks_like_product_detail_url,
     _looks_like_aggregate_product,
+    _navigation_exhausted_reason,
     _select_detail_enrichment_links,
     _walk_api_payload,
 )
@@ -135,6 +137,30 @@ class PlaywrightCatalogLinkTests(unittest.TestCase):
 
         self.assertIn("https://example.com/catalog?q=syrup&page=3", urls)
         self.assertNotIn("https://example.com/catalog?page=1&q=syrup&page=3", urls)
+
+    def test_navigation_exhausted_reason_distinguishes_page_estimates(self):
+        self.assertEqual(
+            _navigation_exhausted_reason(3, 1),
+            "no navigation path found after page 1",
+        )
+        self.assertEqual(
+            _navigation_exhausted_reason(1, 1),
+            "all 1 expected page(s) visited; no further navigation found",
+        )
+        self.assertEqual(
+            _navigation_exhausted_reason(None, 4),
+            "navigation exhausted after page 4",
+        )
+        self.assertEqual(
+            _navigation_exhausted_reason(1, 2),
+            "navigation exhausted after 2 page(s); detected estimate was 1",
+        )
+
+    def test_detail_enrichment_cap_ignores_undercounted_pagination(self):
+        self.assertEqual(_detail_enrichment_count_cap(24, 2, 2, 40), 24)
+        self.assertIsNone(_detail_enrichment_count_cap(24, 1, 2, 40))
+        self.assertIsNone(_detail_enrichment_count_cap(None, None, 3, 40))
+        self.assertIsNone(_detail_enrichment_count_cap(50, 3, 3, 40))
 
 
 if __name__ == "__main__":
