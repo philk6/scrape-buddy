@@ -169,7 +169,88 @@ def _build_xlsx(run: dict) -> io.BytesIO:
     return buf
 
 
-# ── Background workers ────────────────────────────────────────────────────────
+def _html_needs_browser_crawler(html: str | None) -> bool:
+    """
+    Return True when a public scrape should use the full Playwright catalog
+    crawler instead of relying on a one-time HTML snapshot.
+
+    This stays intentionally site-agnostic: it looks for blocked/empty pages,
+    client-side framework signals, and product-like shells with missing prices.
+    """
+    if not html:
+        return True
+
+    lower_html = html.lower()
+    soup_check = BeautifulSoup(html, "html.parser")
+    body_text_len = len(soup_check.get_text(strip=True)) if soup_check.body else 0
+    is_blocked = any(phrase in lower_html for phrase in [
+        "access denied", "403 forbidden", "captcha", "are you a robot",
+        "please enable javascript", "checking your browser",
+    ])
+    is_js_rendered = any(sig in html for sig in [
+        "data-bind=", "ko.applyBindings", "ng-app", "ng-controller",
+        "__NEXT_DATA__", "__NUXT__", "data-reactroot", "__APOLLO_STATE__",
+        "graphql",
+    ])
+
+    def _has_product_class(value) -> bool:
+        if not value:
+            return False
+        class_text = " ".join(value).lower() if isinstance(value, list) else str(value).lower()
+        return any(kw in class_text for kw in ["product", "item", "card", "catalog"])
+
+    has_product_classes = bool(soup_check.find(attrs={"class": _has_product_class}))
+    has_prices = bool(soup_check.find(string=lambda s: s and "$" in s))
+    products_but_no_prices = has_product_classes and not has_prices
+
+    sparse_without_products = body_text_len < 500 and not (has_product_classes and has_prices)
+    return is_blocked or is_js_rendered or products_but_no_prices or sparse_without_products
+
+
+def _catalog_crawl_diagnostics() -> dict:
+    return dict(getattr(playwright_catalog, "LAST_CRAWL_DIAGNOSTICS", {}) or {})
+
+
+def _build_product_diagnostics(
+    products: list,
+    strategy_name: str,
+    crawl_diagnostics: dict | None = None,
+) -> dict:
+    crawl_diagnostics = crawl_diagnostics or {}
+    diagnostics = build_quality_report(
+        products,
+        strategy_name=strategy_name,
+        expected_products=crawl_diagnostics.get("expected_products"),
+        expected_pages=crawl_diagnostics.get("expected_pages"),
+        pages_visited=crawl_diagnostics.get("pages_visited"),
+        stop_reason=crawl_diagnostics.get("stop_reason", ""),
+    )
+    if crawl_diagnostics:
+        diagnostics["crawl"] = dict(crawl_diagnostics)
+    return diagnostics
+
+
+def _run_public_browser_catalog(url: str) -> tuple[dict | None, dict]:
+    """
+    Try the full Playwright catalog crawler for public JavaScript-heavy sites.
+    Returns (result_dict_or_none, crawl_diagnostics).
+    """
+    products = playwright_catalog.run_public(url)
+    crawl_diagnostics = _catalog_crawl_diagnostics()
+    if not products:
+        return None, crawl_diagnostics
+
+    return {
+        "strategy_id": playwright_catalog.ID,
+        "strategy_name": playwright_catalog.NAME,
+        "reason": (
+            "Public browser catalog crawler extracted products using rendered "
+            "DOM, API capture, and interactive pagination"
+        ),
+        "products": products,
+        "_crawl_diagnostics": crawl_diagnostics,
+    }, crawl_diagnostics
+
 
 def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = False) -> None:
     """
@@ -177,16 +258,67 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
     Calls database.complete_run() on success or database.fail_run() on error.
     """
     try:
-        result = run_best_strategy(html, url, use_playwright=use_playwright)
+        result = None
+        browser_crawl_attempt = {}
+
+        if use_playwright:
+            logging.info(
+                f"[Job {run_id}] JS/browser signals detected — trying full "
+                "Playwright catalog crawler first"
+            )
+            try:
+                result, browser_crawl_attempt = _run_public_browser_catalog(url)
+                if result:
+                    logging.info(
+                        f"[Job {run_id}] Browser catalog crawler found "
+                        f"{len(result['products'])} product(s)"
+                    )
+                else:
+                    logging.info(
+                        f"[Job {run_id}] Browser catalog crawler returned no "
+                        "products; falling back to HTML strategy stack"
+                    )
+            except Exception as e:
+                browser_crawl_attempt = _catalog_crawl_diagnostics()
+                logging.warning(
+                    f"[Job {run_id}] Browser catalog crawler failed ({e}); "
+                    "falling back to HTML strategy stack"
+                )
+
+        if result is None:
+            if not html:
+                diagnostics = _build_product_diagnostics(
+                    [],
+                    playwright_catalog.NAME,
+                    browser_crawl_attempt,
+                )
+                database.complete_run(
+                    run_id=run_id,
+                    strategy_id=playwright_catalog.ID,
+                    strategy_name=playwright_catalog.NAME,
+                    products=[],
+                    diagnostics=diagnostics,
+                )
+                logging.info(
+                    f"[Job {run_id}] Completed with no products after browser "
+                    "crawler attempt"
+                )
+                return
+            result = run_best_strategy(html, url, use_playwright=use_playwright)
+
+        crawl_diagnostics = result.pop("_crawl_diagnostics", {}) or {}
         enrich_all_pack(result["products"])
         result["products"] = upc_enrichment.enrich_products_upc(
             result["products"], providers=default_providers()
         )
         result["products"] = normalize_products(result["products"])
-        result["diagnostics"] = build_quality_report(
+        result["diagnostics"] = _build_product_diagnostics(
             result["products"],
-            strategy_name=result.get("strategy_name", ""),
+            result.get("strategy_name", ""),
+            crawl_diagnostics,
         )
+        if browser_crawl_attempt and not crawl_diagnostics:
+            result["diagnostics"]["browser_crawl_attempt"] = dict(browser_crawl_attempt)
 
         # ── Data quality metrics ──────────────────────────────────────────
         products = result["products"]
@@ -258,16 +390,11 @@ def _run_auth_scrape_worker(
         enrich_all_pack(products)
         products = normalize_products(products)
         crawl_diagnostics = getattr(playwright_catalog, "LAST_CRAWL_DIAGNOSTICS", {}) or {}
-        diagnostics = build_quality_report(
+        diagnostics = _build_product_diagnostics(
             products,
-            strategy_name=playwright_catalog.NAME,
-            expected_products=crawl_diagnostics.get("expected_products"),
-            expected_pages=crawl_diagnostics.get("expected_pages"),
-            pages_visited=crawl_diagnostics.get("pages_visited"),
-            stop_reason=crawl_diagnostics.get("stop_reason", ""),
+            playwright_catalog.NAME,
+            crawl_diagnostics,
         )
-        if crawl_diagnostics:
-            diagnostics["crawl"] = dict(crawl_diagnostics)
         database.complete_run(
             run_id=run_id,
             strategy_id=playwright_catalog.ID,
@@ -317,64 +444,29 @@ def scrape():
     label = (data.get("label") or "").strip() or _auto_label(url)
 
     # Fetch HTML synchronously — fast network call, not the slow part.
-    # If requests fails or HTML looks empty/blocked, try Playwright as fallback.
+    # Browser-heavy pages are handed to the background Playwright crawler below.
     html = None
-    fetch_error = None
 
     try:
         html = fetch_html(url)
     except Exception as e:
-        fetch_error = e
-        logging.warning(f"[Scrape] requests fetch failed: {e} — will try Playwright")
-
-    # Determine if we need Playwright (fetch failed, blocked, or JS-rendered)
-    used_playwright = False
-    needs_playwright = html is None
-    if html:
-        lower_html = html.lower()
-        soup_check = BeautifulSoup(html, 'html.parser')
-        body_text_len = len(soup_check.get_text(strip=True)) if soup_check.body else 0
-        is_blocked = any(phrase in lower_html for phrase in [
-            "access denied", "403 forbidden", "captcha", "are you a robot",
-            "please enable javascript", "checking your browser",
-        ])
-        # Check for JS framework that renders products client-side
-        is_js_rendered = any(sig in html for sig in [
-            'data-bind=', 'ko.applyBindings', 'ng-app', 'ng-controller',
-            '__NEXT_DATA__', 'data-reactroot',
-        ])
-        # If products exist in HTML but prices are missing, JS rendering is likely needed
-        has_product_classes = bool(soup_check.find(attrs={"class": lambda c: c and any(
-            kw in ' '.join(c).lower() for kw in ["product", "item", "card"]
-        ) if isinstance(c, list) else False}))
-        has_prices = bool(soup_check.find(string=lambda s: s and '$' in s))
-        products_but_no_prices = has_product_classes and not has_prices
-
-        if body_text_len < 500 or is_blocked or is_js_rendered or products_but_no_prices:
-            needs_playwright = True
-
-    if needs_playwright:
-        try:
-            from scraper import fetch_html_playwright
-            pw_html = fetch_html_playwright(url, wait_ms=4000)
-            if pw_html and (html is None or len(pw_html) > len(html or '') + 200):
-                logging.info(
-                    f"[Scrape] Playwright produced {'initial' if html is None else 'more'} content "
-                    f"({len(pw_html)} chars{f' vs {len(html)} from requests' if html else ''})"
-                )
-                html = pw_html
-                used_playwright = True
-                fetch_error = None
-        except Exception as e:
-            logging.warning(f"[Scrape] Playwright fallback failed: {e}")
-
-    # If we still have no HTML, return error
-    if not html:
-        if fetch_error:
-            if 'Timeout' in type(fetch_error).__name__:
-                return jsonify({"error": "Request timed out."}), 504
-            return jsonify({"error": f"Failed to fetch page: {fetch_error}"}), 502
-        return jsonify({"error": "Could not fetch page content."}), 502
+        logging.warning(
+            f"[Scrape] requests fetch failed: {e} — background browser crawler will try"
+        )
+    use_browser_crawler = _html_needs_browser_crawler(html)
+    if use_browser_crawler:
+        logging.info(
+            "[Scrape] Browser crawler selected for public scrape "
+            "(empty/blocked/JS-rendered/static-incomplete page)"
+        )
+        run_id = database.create_run(label=label, source_url=url)
+        threading.Thread(
+            target=_run_scrape_worker,
+            args=(run_id, url, html or "", True),
+            daemon=True,
+            name=f"scrape-{run_id}",
+        ).start()
+        return jsonify({"run_id": run_id, "label": label, "status": "running"})
 
     # Create the history record immediately so it shows up in the sidebar
     run_id = database.create_run(label=label, source_url=url)
@@ -382,7 +474,7 @@ def scrape():
     # Launch the slow work (parsing + enrichment + DB write) in the background
     threading.Thread(
         target=_run_scrape_worker,
-        args=(run_id, url, html, used_playwright),
+        args=(run_id, url, html, False),
         daemon=True,
         name=f"scrape-{run_id}",
     ).start()

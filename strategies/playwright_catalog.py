@@ -47,7 +47,7 @@ import re
 from bs4 import BeautifulSoup
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
-from scraper import _DYNAMIC_EXPANSION_SELECTORS, _expand_dynamic_catalog, extract_products
+from scraper import HEADERS, _DYNAMIC_EXPANSION_SELECTORS, _expand_dynamic_catalog, extract_products
 from strategies.detail import (
     _collect_product_links,
     _extract_from_detail_page,
@@ -71,13 +71,27 @@ def _positive_int_env(name: str, default: int) -> int:
 
 
 # Hard caps. Defaults favor full catalog coverage; override with env vars for
-# benchmarks or when a supplier has an unusually large catalog.
-MAX_PAGES         = _positive_int_env("SCRAPEBUDDY_AUTH_LISTING_LIMIT", 100)
-RENDER_WAIT_MS    = _positive_int_env("SCRAPEBUDDY_AUTH_RENDER_WAIT_MS", 4_000)
-DETAIL_PAGE_LIMIT = _positive_int_env("SCRAPEBUDDY_AUTH_DETAIL_LIMIT", 2_000)
-AUTH_DETAIL_ENRICH_LIMIT = _positive_int_env("SCRAPEBUDDY_AUTH_DETAIL_ENRICH_LIMIT", DETAIL_PAGE_LIMIT)
+# benchmarks or when a supplier has an unusually large catalog. The generic
+# SCRAPEBUDDY_BROWSER_* names apply to public and authenticated browser crawls;
+# legacy SCRAPEBUDDY_AUTH_* names remain as fallbacks.
+MAX_PAGES = _positive_int_env(
+    "SCRAPEBUDDY_BROWSER_LISTING_LIMIT",
+    _positive_int_env("SCRAPEBUDDY_AUTH_LISTING_LIMIT", 100),
+)
+RENDER_WAIT_MS = _positive_int_env(
+    "SCRAPEBUDDY_BROWSER_RENDER_WAIT_MS",
+    _positive_int_env("SCRAPEBUDDY_AUTH_RENDER_WAIT_MS", 4_000),
+)
+DETAIL_PAGE_LIMIT = _positive_int_env(
+    "SCRAPEBUDDY_BROWSER_DETAIL_LIMIT",
+    _positive_int_env("SCRAPEBUDDY_AUTH_DETAIL_LIMIT", 2_000),
+)
+AUTH_DETAIL_ENRICH_LIMIT = _positive_int_env(
+    "SCRAPEBUDDY_BROWSER_DETAIL_ENRICH_LIMIT",
+    _positive_int_env("SCRAPEBUDDY_AUTH_DETAIL_ENRICH_LIMIT", DETAIL_PAGE_LIMIT),
+)
 
-NASSAU_ERROR_TITLES = {"oops.", "404", "page not found"}
+GENERIC_ERROR_TITLES = {"oops.", "404", "page not found", "not found", "access denied"}
 
 # Minimum visible cards before we start extracting.
 # If fewer than this many are found after the full wait, we log a warning and
@@ -1370,7 +1384,12 @@ def _click_numbered_page(page, target_page: int, winning_selector: str | None) -
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
-def run(state_file: str, listing_url: str) -> list:
+def _run_with_browser_context(
+    listing_url: str,
+    *,
+    storage_state: str | None = None,
+    context_label: str = "browser context",
+) -> list:
     LAST_CRAWL_DIAGNOSTICS.clear()
     """
     Strategy 3 entry point.
@@ -1380,9 +1399,9 @@ def run(state_file: str, listing_url: str) -> list:
     the browser.  No live Playwright objects are passed in.
 
     Args:
-        state_file:   Path to a Playwright storage-state JSON file (from
-                      browser_login.confirm_session()).
-        listing_url:  URL of the authenticated catalog/category page.
+        listing_url:    URL of the catalog/category page.
+        storage_state:  Optional Playwright storage-state JSON file.
+        context_label:  Human-readable label for logs.
 
     Returns:
         List of product dicts (may be empty if nothing found).
@@ -1397,7 +1416,7 @@ def run(state_file: str, listing_url: str) -> list:
         )
         return []
 
-    logger.info(f"[Strategy 3] Phase: reopen authenticated context from {state_file}")
+    logger.info(f"[Strategy 3] Phase: open {context_label}")
 
     try:
         with sync_playwright() as pw:
@@ -1411,11 +1430,17 @@ def run(state_file: str, listing_url: str) -> list:
                 return []
 
             try:
-                context = browser.new_context(storage_state=state_file)
+                context_kwargs = {
+                    "user_agent": HEADERS.get("User-Agent"),
+                    "viewport": {"width": 1920, "height": 1080},
+                }
+                if storage_state:
+                    context_kwargs["storage_state"] = storage_state
+                context = browser.new_context(**context_kwargs)
             except Exception as e:
                 logger.error(
-                    f"[Strategy 3] reopen authenticated context — "
-                    f"failed to load storage state from {state_file!r}: {e}"
+                    f"[Strategy 3] open {context_label} — "
+                    f"failed to create browser context: {e}"
                 )
                 try:
                     browser.close()
@@ -1445,6 +1470,38 @@ def run(state_file: str, listing_url: str) -> list:
         return []
 
 
+def run(state_file: str, listing_url: str) -> list:
+    """
+    Authenticated Strategy 3 entry point.
+
+    Args:
+        state_file:   Path to a Playwright storage-state JSON file from
+                      browser_login.confirm_session().
+        listing_url:  URL of the authenticated catalog/category page.
+    """
+    return _run_with_browser_context(
+        listing_url,
+        storage_state=state_file,
+        context_label=f"authenticated context from {state_file}",
+    )
+
+
+def run_public(listing_url: str) -> list:
+    """
+    Public Strategy 3 entry point for JavaScript-heavy catalogs.
+
+    Uses the same universal browser crawler as authenticated scrapes, but
+    without a saved storage state. This keeps public JS catalogs on the path
+    that can scroll, click pagination, capture API JSON, and emit crawl
+    diagnostics.
+    """
+    return _run_with_browser_context(
+        listing_url,
+        storage_state=None,
+        context_label="public browser context",
+    )
+
+
 def _looks_like_product_detail_url(url: str) -> bool:
     url = (url or "").strip().lower()
     if not url:
@@ -1462,10 +1519,9 @@ def _looks_like_product_detail_url(url: str) -> bool:
     if not url.endswith('.html'):
         return False
 
-    # Nassau category-like .html URLs can still appear in listing cards.
-    # Real product detail pages are usually shallow slugs like
-    # /goo-goo-cluster-original-1-75oz.html, while category-like pages contain
-    # path segments such as /beverages/energy-drinks.html.
+    # Category-like .html URLs can still appear in listing cards. Real product
+    # detail pages are usually shallow slugs, while category-like pages contain
+    # deeper taxonomy path segments.
     path = urlparse(url).path.strip('/')
     if not path:
         return False
@@ -1485,11 +1541,9 @@ def _is_valid_detail_product(detail: dict) -> tuple[bool, str]:
     upc = (detail.get("upc") or "").strip()
     image_url = (detail.get("image_url") or "").strip().lower()
 
-    if name.lower() in NASSAU_ERROR_TITLES:
+    if name.lower() in GENERIC_ERROR_TITLES:
         return False, f"error title: {name}"
-    if "logo/default/logo.png" in image_url and not any([sku, price, upc]):
-        return False, "site-logo image with no product fields"
-    if name and "nassau candy" in name.lower() and not any([sku, price, upc]):
+    if "logo" in image_url and not any([sku, price, upc]):
         return False, "site-level title without product fields"
     if not any([name, sku, price, upc]):
         return False, "no trusted product fields"
@@ -1827,7 +1881,7 @@ def _run_inner(page, listing_url: str) -> list:
 
         # Track best card selector for fingerprinting on page transitions.
         # Only trust selectors that look card-granular enough to avoid wrapper explosions
-        # on later Nassau pages (e.g. 459 pseudo-cards vs 67 real product cards).
+        # on later pages (e.g. broad wrapper matches vs real product cards).
         if (
             detected_selector
             and card_count >= MIN_CARDS_THRESHOLD

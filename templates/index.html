@@ -1538,6 +1538,7 @@
 
     const diag = getDiagnostics(run);
     const warnings = Array.isArray(diag.warnings) ? diag.warnings : [];
+    const crawl = diag.crawl && typeof diag.crawl === 'object' ? diag.crawl : {};
     const diagnostics = [
       ['Supplier', safeDomain(run.source_url || '') || '—'],
       ['Strategy', run.strategy_name || '—'],
@@ -1548,6 +1549,25 @@
     ];
     if (typeof diag.score === 'number') {
       diagnostics.push(['Quality Score', `${Math.round(diag.score * 100)}%`]);
+    }
+    if (Object.keys(crawl).length) {
+      if (crawl.pages_visited !== undefined || crawl.expected_pages !== undefined) {
+        const visited = crawl.pages_visited ?? '—';
+        const expected = crawl.expected_pages ?? '?';
+        diagnostics.push(['Pages Visited', `${visited} / ${expected}`]);
+      }
+      if (crawl.expected_products !== undefined) {
+        diagnostics.push(['Expected Products', String(crawl.expected_products)]);
+      }
+      if (crawl.product_links_collected !== undefined) {
+        diagnostics.push(['Product Links', String(crawl.product_links_collected)]);
+      }
+      if (crawl.api_products_collected !== undefined) {
+        diagnostics.push(['API Products', String(crawl.api_products_collected)]);
+      }
+      if (crawl.stop_reason) {
+        diagnostics.push(['Stop Reason', crawl.stop_reason]);
+      }
     }
     if (warnings.length) {
       diagnostics.push(['Warnings', warnings.slice(0, 3).join(' | ')]);
