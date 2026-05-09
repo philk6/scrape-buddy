@@ -10,10 +10,11 @@ automatically inherit the user's local browser cookies.
 from __future__ import annotations
 
 import logging
+import json
 import os
 import re
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -59,6 +60,14 @@ PROMPT = (
     "UPC, EAN, GTIN, price, pack_size, case_pack, image_url, and product_url. "
     "Only return real products, not category headings, navigation, ads, filters, "
     "or result-count summary text. Preserve barcode digits exactly when shown."
+)
+
+
+AUTH_PROMPT = (
+    PROMPT
+    + " This page may be inside an authenticated supplier account. Use the "
+    "current authenticated session state and extract the products visible to "
+    "that logged-in account."
 )
 
 
@@ -139,19 +148,43 @@ def _extract_products_from_response(payload: dict, base_url: str) -> list[dict]:
     return normalize_products(cleaned)
 
 
-def run(url: str) -> list[dict]:
-    key = api_key()
-    if not key:
-        logger.info("[Firecrawl] FIRECRAWL_API_KEY not set; skipping")
-        return []
+def _domain_matches(cookie_domain: str, host: str) -> bool:
+    cookie_domain = (cookie_domain or "").lstrip(".").lower()
+    host = (host or "").lower()
+    return bool(cookie_domain and host) and (
+        host == cookie_domain or host.endswith("." + cookie_domain)
+    )
 
-    body = {
+
+def _cookie_header_from_state_file(state_file: str, url: str) -> str:
+    try:
+        with open(state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+    except Exception as e:
+        logger.warning(f"[Firecrawl] Could not read auth state file: {e}")
+        return ""
+
+    host = urlparse(url).hostname or ""
+    cookie_parts: list[str] = []
+    for cookie in state.get("cookies", []) if isinstance(state, dict) else []:
+        domain = cookie.get("domain") or ""
+        name = cookie.get("name") or ""
+        value = cookie.get("value") or ""
+        if not name or value is None:
+            continue
+        if _domain_matches(domain, host):
+            cookie_parts.append(f"{name}={value}")
+    return "; ".join(cookie_parts)
+
+
+def _request_body(url: str, *, authenticated: bool = False) -> dict:
+    return {
         "url": url,
         "formats": [
             {
                 "type": "json",
                 "schema": PRODUCT_SCHEMA,
-                "prompt": PROMPT,
+                "prompt": AUTH_PROMPT if authenticated else PROMPT,
             }
         ],
         "onlyMainContent": False,
@@ -165,6 +198,18 @@ def run(url: str) -> list[dict]:
             {"type": "scroll"},
         ],
     }
+
+
+def run(url: str, *, headers_override: dict | None = None, authenticated: bool = False) -> list[dict]:
+    key = api_key()
+    if not key:
+        logger.info("[Firecrawl] FIRECRAWL_API_KEY not set; skipping")
+        return []
+
+    body = _request_body(url, authenticated=authenticated)
+    if headers_override:
+        body["headers"] = headers_override
+
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
@@ -187,3 +232,21 @@ def run(url: str) -> list[dict]:
     products = _extract_products_from_response(payload, url)
     logger.info(f"[Firecrawl] Extracted {len(products)} product(s)")
     return products
+
+
+def run_authenticated(url: str, state_file: str) -> list[dict]:
+    cookie_header = _cookie_header_from_state_file(state_file, url)
+    if not cookie_header:
+        logger.info("[Firecrawl] No matching authenticated cookies found; skipping auth scrape")
+        return []
+    headers_override = {
+        "Cookie": cookie_header,
+        "Referer": url,
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+    }
+    logger.info("[Firecrawl] Trying authenticated hosted extraction with session cookies")
+    return run(url, headers_override=headers_override, authenticated=True)

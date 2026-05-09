@@ -1,4 +1,6 @@
 import os
+import json
+import tempfile
 import unittest
 
 from strategies import firecrawl_fallback
@@ -59,6 +61,31 @@ class FirecrawlFallbackTests(unittest.TestCase):
         self.assertEqual(products[0]["product_url"], "https://example.com/product/syrup")
         self.assertEqual(products[0]["upc"], "1234567890123")
         self.assertEqual(products[0]["identifier_type"], "ean13")
+
+    def test_cookie_header_from_state_file_filters_to_target_domain(self):
+        state = {
+            "cookies": [
+                {"name": "session", "value": "abc", "domain": ".example.com"},
+                {"name": "other", "value": "def", "domain": ".other.com"},
+                {"name": "pref", "value": "light", "domain": "shop.example.com"},
+            ]
+        }
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(state, f)
+
+            header = firecrawl_fallback._cookie_header_from_state_file(
+                path,
+                "https://shop.example.com/catalog",
+            )
+        finally:
+            os.remove(path)
+
+        self.assertIn("session=abc", header)
+        self.assertIn("pref=light", header)
+        self.assertNotIn("other=def", header)
 
 
 if __name__ == "__main__":

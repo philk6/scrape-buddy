@@ -42,7 +42,7 @@ import upc_enrichment
 from scraper import fetch_html, debug_scrape, make_auth_fetch_fn
 from strategies import run_best_strategy
 from strategies.detail import run as detail_run
-from strategies import playwright_catalog
+from strategies import playwright_catalog, firecrawl_fallback
 from strategies.product_quality import build_error_report, build_quality_report, normalize_products
 from upc_providers import default_providers
 from pack_parser import enrich_all as enrich_all_pack
@@ -407,19 +407,43 @@ def _run_auth_scrape_worker(
     or mask the real detail-page values during Nassau/login hardening.
     """
     try:
-        products = playwright_catalog.run(state_file, url)
+        products = []
+        strategy_id = playwright_catalog.ID
+        strategy_name = playwright_catalog.NAME
+        crawl_diagnostics = {}
+
+        if firecrawl_fallback.enabled():
+            try:
+                products = firecrawl_fallback.run_authenticated(url, state_file)
+                if products:
+                    strategy_id = firecrawl_fallback.ID
+                    strategy_name = f"{firecrawl_fallback.NAME} (Authenticated)"
+                    crawl_diagnostics = {
+                        "authenticated_firecrawl": True,
+                        "stop_reason": "Firecrawl authenticated extraction succeeded",
+                    }
+                    logging.info(
+                        f"[Job {run_id}] Firecrawl authenticated scrape found "
+                        f"{len(products)} product(s)"
+                    )
+            except Exception as e:
+                logging.warning(f"[Job {run_id}] Firecrawl authenticated scrape failed: {e}")
+
+        if not products:
+            products = playwright_catalog.run(state_file, url)
+            crawl_diagnostics = getattr(playwright_catalog, "LAST_CRAWL_DIAGNOSTICS", {}) or {}
+
         enrich_all_pack(products)
         products = normalize_products(products)
-        crawl_diagnostics = getattr(playwright_catalog, "LAST_CRAWL_DIAGNOSTICS", {}) or {}
         diagnostics = _build_product_diagnostics(
             products,
-            playwright_catalog.NAME,
+            strategy_name,
             crawl_diagnostics,
         )
         database.complete_run(
             run_id=run_id,
-            strategy_id=playwright_catalog.ID,
-            strategy_name=playwright_catalog.NAME,
+            strategy_id=strategy_id,
+            strategy_name=strategy_name,
             products=products,
             diagnostics=diagnostics,
         )
