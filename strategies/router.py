@@ -28,7 +28,7 @@ Planned future strategies:
 import logging
 import os
 import re
-from . import listing, detail
+from . import listing, detail, firecrawl_fallback
 from .detail import count_product_links, enrich_from_detail_pages
 from .page_classifier import classify as classify_page
 from .product_quality import build_quality_report, normalize_products
@@ -65,6 +65,26 @@ def _finalize_result_dict(result: dict) -> dict:
         strategy_name=result.get("strategy_name", ""),
     )
     return result
+
+
+def _try_firecrawl_fallback(url: str, reason_prefix: str = "") -> dict | None:
+    if not firecrawl_fallback.enabled():
+        logger.info("[Router] Firecrawl fallback disabled or FIRECRAWL_API_KEY not set")
+        return None
+
+    products = firecrawl_fallback.run(url)
+    if not products:
+        return None
+
+    reason = (
+        f"{reason_prefix}; Firecrawl hosted JSON extraction returned "
+        f"{len(products)} product(s)"
+    ).strip("; ")
+    return _result(
+        {"id": firecrawl_fallback.ID, "name": firecrawl_fallback.NAME},
+        products,
+        reason,
+    )
 
 
 def _static_html_has_product_content(html: str) -> bool:
@@ -433,6 +453,13 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
         return _finalize_result_dict(pipeline_result)
 
     # ── Nothing worked anywhere — return best partial result ──────────────────
+    firecrawl_result = _try_firecrawl_fallback(
+        url,
+        reason_prefix="Local extraction and Playwright pipeline returned no products",
+    )
+    if firecrawl_result:
+        return firecrawl_result
+
     best_products = products_s1 or products_s2 or pipeline_result.get("products", [])
     reason = (
         f"All extraction methods returned few results. "
