@@ -2328,11 +2328,23 @@ def _run_inner(page, listing_url: str) -> list:
                     if listing_row:
                         enriched.append(listing_row)
 
-            enriched_urls = {(p.get("product_url") or "").strip() for p in enriched}
+            enriched_keys = {
+                (
+                    (p.get("product_url") or "").strip()
+                    or (p.get("sku") or "").strip()
+                    or f"{p.get('product_name')}|{p.get('price')}"
+                )
+                for p in enriched
+            }
             for row in deduped:
-                row_url = (row.get("product_url") or "").strip()
-                if row_url and row_url not in enriched_urls:
+                row_key = (
+                    (row.get("product_url") or "").strip()
+                    or (row.get("sku") or "").strip()
+                    or f"{row.get('product_name')}|{row.get('price')}"
+                )
+                if row_key and row_key not in enriched_keys:
                     enriched.append(row)
+                    enriched_keys.add(row_key)
 
             final_products, _ = _dedup_products(enriched)
             logger.info(

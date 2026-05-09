@@ -261,7 +261,32 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
         result = None
         browser_crawl_attempt = {}
 
-        if use_playwright:
+        if firecrawl_fallback.enabled():
+            try:
+                firecrawl_products = firecrawl_fallback.run(url)
+                if firecrawl_products:
+                    logging.info(
+                        f"[Job {run_id}] Firecrawl primary scrape found "
+                        f"{len(firecrawl_products)} product(s)"
+                    )
+                    result = {
+                        "strategy_id": firecrawl_fallback.ID,
+                        "strategy_name": firecrawl_fallback.NAME,
+                        "reason": "Firecrawl primary extraction is enabled",
+                        "products": firecrawl_products,
+                    }
+                else:
+                    logging.info(
+                        f"[Job {run_id}] Firecrawl primary scrape returned no products; "
+                        "continuing with local stack"
+                    )
+            except Exception as e:
+                logging.warning(
+                    f"[Job {run_id}] Firecrawl primary scrape failed ({e}); "
+                    "continuing with local stack"
+                )
+
+        if result is None and use_playwright:
             logging.info(
                 f"[Job {run_id}] JS/browser signals detected — trying full "
                 "Playwright catalog crawler first"
