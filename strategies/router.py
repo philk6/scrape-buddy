@@ -87,6 +87,19 @@ def _try_firecrawl_fallback(url: str, reason_prefix: str = "") -> dict | None:
     )
 
 
+def _firecrawl_mode() -> str:
+    return os.environ.get("SCRAPEBUDDY_FIRECRAWL_MODE", "first").strip().lower()
+
+
+def _should_try_firecrawl_first() -> bool:
+    return firecrawl_fallback.enabled() and _firecrawl_mode() in {
+        "first",
+        "primary",
+        "always",
+        "firecrawl_first",
+    }
+
+
 def _static_html_has_product_content(html: str) -> bool:
     """
     Quick heuristic: does the static HTML contain actual product data?
@@ -233,6 +246,19 @@ def _run(html: str, url: str, use_playwright: bool = False) -> dict:
     #      LOOK normal (long body text, nav chrome) but products are JS-rendered.
     #      This catches KnockoutJS, Angular, and API-driven sites that the
     #      simple js_app heuristic misses.
+    if _should_try_firecrawl_first():
+        firecrawl_result = _try_firecrawl_fallback(
+            url,
+            reason_prefix="Firecrawl primary extraction is enabled",
+        )
+        if firecrawl_result:
+            logger.info("[Router] Firecrawl primary extraction succeeded")
+            return firecrawl_result
+        logger.info(
+            "[Router] Firecrawl primary extraction returned no products; "
+            "continuing with local extraction"
+        )
+
     playwright_attempted = False
     static_has_products = _static_html_has_product_content(html)
 

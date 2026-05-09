@@ -13,6 +13,20 @@ class FirecrawlFallbackTests(unittest.TestCase):
             if old is not None:
                 os.environ["FIRECRAWL_API_KEY"] = old
 
+    def test_enabled_allows_primary_mode_with_api_key(self):
+        old_key = os.environ.get("FIRECRAWL_API_KEY")
+        old_disabled = os.environ.pop("SCRAPEBUDDY_FIRECRAWL_DISABLED", None)
+        try:
+            os.environ["FIRECRAWL_API_KEY"] = "fc-test"
+            self.assertTrue(firecrawl_fallback.enabled())
+        finally:
+            if old_key is None:
+                os.environ.pop("FIRECRAWL_API_KEY", None)
+            else:
+                os.environ["FIRECRAWL_API_KEY"] = old_key
+            if old_disabled is not None:
+                os.environ["SCRAPEBUDDY_FIRECRAWL_DISABLED"] = old_disabled
+
     def test_extract_products_from_nested_response(self):
         payload = {
             "success": True,

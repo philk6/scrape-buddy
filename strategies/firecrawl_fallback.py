@@ -1,10 +1,10 @@
 """
-Optional Firecrawl extraction fallback.
+Firecrawl hosted extraction strategy.
 
-This strategy is intentionally opt-in. It uses Firecrawl's hosted scraper and
-JSON extraction when a public catalog defeats the local/static/Playwright
-pipeline. It is not used for authenticated supplier sessions because Firecrawl
-does not automatically inherit the user's local browser cookies.
+When FIRECRAWL_API_KEY is configured, public catalog scrapes can use Firecrawl
+as the primary extraction pass or as a fallback, depending on router settings.
+It is not used for authenticated supplier sessions because Firecrawl does not
+automatically inherit the user's local browser cookies.
 """
 
 from __future__ import annotations
