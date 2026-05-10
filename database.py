@@ -22,7 +22,7 @@ save_scrape() + _row_to_product() below — no other files need to change.
 import sqlite3
 import os
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # Database file lives in the same directory as this module
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scrape_history.db")
@@ -349,6 +349,33 @@ def fail_run(run_id: int, error_message: str, diagnostics: dict | None = None) -
         )
 
 
+def fail_stale_running_runs(max_age_hours: int = 6) -> int:
+    """Mark old running jobs as failed so the UI cannot show them forever."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    cutoff_iso = cutoff.isoformat()
+    finished_at = datetime.now(timezone.utc).isoformat()
+    diagnostics = {
+        "score": 0.0,
+        "warnings": [
+            f"Run was still marked running after {max_age_hours} hour(s); marked stale."
+        ],
+        "error_category": "stale_running_job",
+    }
+    with get_connection() as conn:
+        cur = conn.execute(
+            """UPDATE scrape_runs
+               SET status='failed', finished_at=?, error_message=?, diagnostics_json=?
+               WHERE status='running' AND COALESCE(started_at, timestamp) < ?""",
+            (
+                finished_at,
+                f"Run exceeded {max_age_hours} hour(s) without completing.",
+                json.dumps(diagnostics, ensure_ascii=False),
+                cutoff_iso,
+            ),
+        )
+    return cur.rowcount
+
+
 # ── Read operations ───────────────────────────────────────────────────────────
 
 def get_history() -> list:
@@ -356,6 +383,7 @@ def get_history() -> list:
     Return all scrape runs, newest first, without product rows.
     Each entry: {id, label, source_url, timestamp, strategy_name, product_count}
     """
+    fail_stale_running_runs()
     with get_connection() as conn:
         rows = conn.execute(
             """SELECT id, label, source_url, timestamp, strategy_name, product_count,

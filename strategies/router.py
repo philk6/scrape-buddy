@@ -88,7 +88,7 @@ def _try_firecrawl_fallback(url: str, reason_prefix: str = "") -> dict | None:
 
 
 def _firecrawl_mode() -> str:
-    return os.environ.get("SCRAPEBUDDY_FIRECRAWL_MODE", "first").strip().lower()
+    return os.environ.get("SCRAPEBUDDY_FIRECRAWL_MODE", "fallback").strip().lower()
 
 
 def _should_try_firecrawl_first() -> bool:

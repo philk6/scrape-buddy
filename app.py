@@ -261,7 +261,9 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
         result = None
         browser_crawl_attempt = {}
 
-        if firecrawl_fallback.enabled():
+        firecrawl_mode = os.environ.get("SCRAPEBUDDY_FIRECRAWL_MODE", "fallback").strip().lower()
+        firecrawl_first = firecrawl_mode in {"first", "primary", "always", "firecrawl_first"}
+        if firecrawl_first and firecrawl_fallback.enabled():
             try:
                 firecrawl_products = firecrawl_fallback.run(url)
                 if firecrawl_products:
@@ -312,13 +314,47 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
 
         if result is None:
             if use_playwright and _html_needs_browser_crawler(html):
+                if firecrawl_fallback.enabled():
+                    try:
+                        firecrawl_products = firecrawl_fallback.run(url)
+                        if firecrawl_products:
+                            result = {
+                                "strategy_id": firecrawl_fallback.ID,
+                                "strategy_name": firecrawl_fallback.NAME,
+                                "reason": "Firecrawl fallback after browser crawler returned no products",
+                                "products": firecrawl_products,
+                                "_crawl_diagnostics": browser_crawl_attempt,
+                            }
+                    except Exception as e:
+                        logging.warning(f"[Job {run_id}] Firecrawl fallback failed: {e}")
+                if result is not None:
+                    pass
+                else:
+                    diagnostics = _build_product_diagnostics(
+                        [],
+                        playwright_catalog.NAME,
+                        browser_crawl_attempt,
+                    )
+                    diagnostics.setdefault("warnings", []).append(
+                        "Browser crawler found no products, and the static HTML looked blocked or JavaScript-rendered; skipped static fallback to avoid navigation rows."
+                    )
+                    database.complete_run(
+                        run_id=run_id,
+                        strategy_id=playwright_catalog.ID,
+                        strategy_name=playwright_catalog.NAME,
+                        products=[],
+                        diagnostics=diagnostics,
+                    )
+                    logging.info(
+                        f"[Job {run_id}] Completed with no products after browser "
+                        "crawler attempt; skipped blocked/JS static fallback"
+                    )
+                    return
+            if result is None and not html:
                 diagnostics = _build_product_diagnostics(
                     [],
                     playwright_catalog.NAME,
                     browser_crawl_attempt,
-                )
-                diagnostics.setdefault("warnings", []).append(
-                    "Browser crawler found no products, and the static HTML looked blocked or JavaScript-rendered; skipped static fallback to avoid navigation rows."
                 )
                 database.complete_run(
                     run_id=run_id,
@@ -327,30 +363,12 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
                     products=[],
                     diagnostics=diagnostics,
                 )
-                logging.info(
-                    f"[Job {run_id}] Completed with no products after browser "
-                    "crawler attempt; skipped blocked/JS static fallback"
-                )
+                logging.info(f"[Job {run_id}] Completed with no products after browser crawler attempt")
                 return
-            if not html:
-                diagnostics = _build_product_diagnostics(
-                    [],
-                    playwright_catalog.NAME,
-                    browser_crawl_attempt,
-                )
-                database.complete_run(
-                    run_id=run_id,
-                    strategy_id=playwright_catalog.ID,
-                    strategy_name=playwright_catalog.NAME,
-                    products=[],
-                    diagnostics=diagnostics,
-                )
-                logging.info(
-                    f"[Job {run_id}] Completed with no products after browser "
-                    "crawler attempt"
-                )
-                return
-            result = run_best_strategy(html, url, use_playwright=use_playwright)
+            if result is not None:
+                pass
+            else:
+                result = run_best_strategy(html, url, use_playwright=use_playwright)
 
         crawl_diagnostics = result.pop("_crawl_diagnostics", {}) or {}
         enrich_all_pack(result["products"])
