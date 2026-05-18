@@ -43,6 +43,7 @@ from scraper import fetch_html, debug_scrape, make_auth_fetch_fn
 from strategies import run_best_strategy
 from strategies.detail import run as detail_run
 from strategies import playwright_catalog, firecrawl_fallback
+from strategies.pagination import dedup_products
 from strategies.product_quality import build_error_report, build_quality_report, normalize_products
 from upc_providers import default_providers
 from pack_parser import enrich_all as enrich_all_pack
@@ -252,6 +253,51 @@ def _run_public_browser_catalog(url: str) -> tuple[dict | None, dict]:
     }, crawl_diagnostics
 
 
+def _firecrawl_mode() -> str:
+    return os.environ.get("SCRAPEBUDDY_FIRECRAWL_MODE", "fallback").strip().lower()
+
+
+def _auth_firecrawl_mode() -> str:
+    return os.environ.get("SCRAPEBUDDY_FIRECRAWL_AUTH_MODE", "fallback").strip().lower()
+
+
+def _merge_products(primary: list[dict], supplemental: list[dict]) -> list[dict]:
+    merged, _removed = dedup_products((primary or []) + (supplemental or []))
+    return merged
+
+
+def _should_try_firecrawl_supplement(products: list[dict], crawl_diagnostics: dict) -> bool:
+    if not firecrawl_fallback.enabled():
+        return False
+    mode = _firecrawl_mode()
+    if mode in {"0", "off", "disabled", "none", "never"}:
+        return False
+    if mode in {"supplement", "always"}:
+        return True
+    if not products:
+        return True
+    try:
+        expected = int(crawl_diagnostics.get("expected_products") or 0)
+    except Exception:
+        expected = 0
+    if len(products) < 5:
+        return True
+    return bool(expected and len(products) < expected * 0.5)
+
+
+def _mark_external_upc_skipped(products: list[dict], reason: str) -> None:
+    for product in products or []:
+        if product.get("upc") or product.get("ean") or product.get("gtin"):
+            product.setdefault("upc_source", "supplier_page")
+            product.setdefault("upc_enriched", "0")
+            product.setdefault("missing_upc", "0")
+            continue
+        product.setdefault("upc_enriched", "0")
+        product.setdefault("missing_upc", "1")
+        product.setdefault("resolution_status", "external_lookup_skipped")
+        product.setdefault("resolution_reason", reason)
+
+
 def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = False) -> None:
     """
     Run scraping strategies + enrichment in a background thread.
@@ -261,8 +307,13 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
         result = None
         browser_crawl_attempt = {}
 
-        firecrawl_mode = os.environ.get("SCRAPEBUDDY_FIRECRAWL_MODE", "fallback").strip().lower()
+        firecrawl_mode = _firecrawl_mode()
         firecrawl_first = firecrawl_mode in {"first", "primary", "always", "firecrawl_first"}
+        hosted_before_browser = (
+            use_playwright
+            and firecrawl_fallback.enabled()
+            and firecrawl_mode not in {"0", "off", "disabled", "none", "never", "local_first"}
+        )
         if firecrawl_first and firecrawl_fallback.enabled():
             try:
                 firecrawl_products = firecrawl_fallback.run(url)
@@ -288,6 +339,41 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
                     "continuing with local stack"
                 )
 
+        if result is None and hosted_before_browser:
+            try:
+                firecrawl_products = firecrawl_fallback.run(url)
+                if firecrawl_products:
+                    logging.info(
+                        f"[Job {run_id}] Firecrawl hosted render found "
+                        f"{len(firecrawl_products)} product(s) before local browser crawl"
+                    )
+                    result = {
+                        "strategy_id": firecrawl_fallback.ID,
+                        "strategy_name": firecrawl_fallback.NAME,
+                        "reason": (
+                            "Firecrawl hosted rendered extraction returned a "
+                            "usable baseline before local browser crawl"
+                        ),
+                        "products": firecrawl_products,
+                        "_crawl_diagnostics": {
+                            "hosted_render_first": True,
+                            "stop_reason": (
+                                "Hosted rendered extraction succeeded; skipped local browser crawl "
+                                "to avoid long-running public JS scrape"
+                            ),
+                        },
+                    }
+                else:
+                    logging.info(
+                        f"[Job {run_id}] Firecrawl hosted render returned no products; "
+                        "trying local browser crawler"
+                    )
+            except Exception as e:
+                logging.warning(
+                    f"[Job {run_id}] Firecrawl hosted render failed ({e}); "
+                    "trying local browser crawler"
+                )
+
         if result is None and use_playwright:
             logging.info(
                 f"[Job {run_id}] JS/browser signals detected — trying full "
@@ -305,6 +391,30 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
                         f"[Job {run_id}] Browser catalog crawler returned no "
                         "products; falling back to HTML strategy stack"
                     )
+                if result and _should_try_firecrawl_supplement(
+                    result.get("products", []),
+                    browser_crawl_attempt,
+                ):
+                    try:
+                        firecrawl_products = firecrawl_fallback.run(url)
+                        if firecrawl_products:
+                            before = len(result.get("products", []))
+                            merged = _merge_products(result.get("products", []), firecrawl_products)
+                            if len(merged) > before:
+                                result["products"] = merged
+                                result["reason"] = (
+                                    result.get("reason", "")
+                                    + f"; Firecrawl supplemented {len(firecrawl_products)} hosted extraction row(s)"
+                                )
+                                result.setdefault("_crawl_diagnostics", {})[
+                                    "firecrawl_supplement_products"
+                                ] = len(firecrawl_products)
+                                logging.info(
+                                    f"[Job {run_id}] Firecrawl supplement increased "
+                                    f"browser result from {before} to {len(merged)} product(s)"
+                                )
+                    except Exception as e:
+                        logging.warning(f"[Job {run_id}] Firecrawl supplement failed: {e}")
             except Exception as e:
                 browser_crawl_attempt = _catalog_crawl_diagnostics()
                 logging.warning(
@@ -371,10 +481,19 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
                 result = run_best_strategy(html, url, use_playwright=use_playwright)
 
         crawl_diagnostics = result.pop("_crawl_diagnostics", {}) or {}
-        enrich_all_pack(result["products"])
-        result["products"] = upc_enrichment.enrich_products_upc(
-            result["products"], providers=default_providers()
+        skip_external_upc = bool(result.pop("_skip_external_upc_enrichment", False)) or (
+            result.get("strategy_id") == firecrawl_fallback.ID
         )
+        enrich_all_pack(result["products"])
+        if skip_external_upc:
+            _mark_external_upc_skipped(
+                result["products"],
+                "external UPC lookup skipped for hosted rendered extraction; visible supplier identifiers were preserved",
+            )
+        else:
+            result["products"] = upc_enrichment.enrich_products_upc(
+                result["products"], providers=default_providers()
+            )
         result["products"] = normalize_products(result["products"])
         result["diagnostics"] = _build_product_diagnostics(
             result["products"],
@@ -454,8 +573,10 @@ def _run_auth_scrape_worker(
         strategy_id = playwright_catalog.ID
         strategy_name = playwright_catalog.NAME
         crawl_diagnostics = {}
+        auth_firecrawl_mode = _auth_firecrawl_mode()
+        firecrawl_first = auth_firecrawl_mode in {"first", "primary", "always", "firecrawl_first"}
 
-        if firecrawl_fallback.enabled():
+        if firecrawl_first and firecrawl_fallback.enabled():
             try:
                 products = firecrawl_fallback.run_authenticated(url, state_file)
                 if products:
@@ -475,6 +596,42 @@ def _run_auth_scrape_worker(
         if not products:
             products = playwright_catalog.run(state_file, url)
             crawl_diagnostics = getattr(playwright_catalog, "LAST_CRAWL_DIAGNOSTICS", {}) or {}
+
+        should_try_auth_firecrawl = (
+            firecrawl_fallback.enabled()
+            and not firecrawl_first
+            and auth_firecrawl_mode not in {"0", "off", "disabled", "none", "never"}
+            and (not products or auth_firecrawl_mode in {"supplement", "always"})
+        )
+        if should_try_auth_firecrawl:
+            try:
+                firecrawl_products = firecrawl_fallback.run_authenticated(url, state_file)
+                if firecrawl_products:
+                    crawl_diagnostics["authenticated_firecrawl_products"] = len(firecrawl_products)
+                    if products:
+                        before = len(products)
+                        products = _merge_products(products, firecrawl_products)
+                        if len(products) > before:
+                            strategy_name = f"{strategy_name} + Firecrawl Auth Supplement"
+                            crawl_diagnostics["authenticated_firecrawl_added"] = len(products) - before
+                            logging.info(
+                                f"[Job {run_id}] Firecrawl authenticated supplement increased "
+                                f"local result from {before} to {len(products)} product(s)"
+                            )
+                    else:
+                        products = firecrawl_products
+                        strategy_id = firecrawl_fallback.ID
+                        strategy_name = f"{firecrawl_fallback.NAME} (Authenticated)"
+                        crawl_diagnostics["authenticated_firecrawl"] = True
+                        crawl_diagnostics["stop_reason"] = (
+                            "Firecrawl authenticated extraction succeeded after local crawler returned no products"
+                        )
+                        logging.info(
+                            f"[Job {run_id}] Firecrawl authenticated fallback found "
+                            f"{len(products)} product(s)"
+                        )
+            except Exception as e:
+                logging.warning(f"[Job {run_id}] Firecrawl authenticated fallback failed: {e}")
 
         enrich_all_pack(products)
         products = normalize_products(products)

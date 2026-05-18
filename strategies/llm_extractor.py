@@ -1,313 +1,351 @@
 """
-strategies/llm_extractor.py — Tier 2: LLM-Assisted Product Extraction
+OpenAI-assisted product extraction.
 
-When structured data (JSON-LD, microdata, OG tags) and CSS heuristics fail,
-this module sends cleaned/truncated HTML to an LLM and asks it to extract
-products like a human would.
-
-This makes Scrape Buddy truly universal — the LLM reads any layout.
-
-Cost controls:
-  - HTML is cleaned (scripts, styles, nav, footer removed) before sending
-  - Truncated to MAX_HTML_CHARS (~50k chars ≈ ~12k tokens)
-  - Uses gpt-4o-mini by default (cheap, fast, good at structured extraction)
-  - Response limited to max_tokens=4096
-
-Public API:
-  extract(html, url) -> list[dict]
-    Returns a list of product dicts. Empty list if extraction fails.
-
-Environment:
-  Requires OPENAI_API_KEY in environment (already used by app.py).
+This tier is the "human eyes" layer for Scraper Buddy. It does not browse a
+site by itself; it reads rendered HTML or Firecrawl markdown that another layer
+already fetched, then returns structured product rows.
 """
+
+from __future__ import annotations
 
 import json
 import logging
 import os
 import re
+from typing import Any
 from urllib.parse import urljoin
+
+from .product_quality import normalize_products
 
 logger = logging.getLogger(__name__)
 
-# ── Configuration ───────────────────────────────────────────────────────────────
+MAX_CONTENT_CHARS = 90_000
+MAX_RESPONSE_TOKENS = 16_000
+DEFAULT_MODEL = "gpt-5.4-mini"
 
-# Maximum characters of cleaned HTML to send to the LLM.
-# ~50k chars ≈ ~12k tokens with gpt-4o-mini tokenizer.
-MAX_HTML_CHARS = 50_000
+PRODUCT_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "products": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "product_name": {"type": "string"},
+                    "brand": {"type": "string"},
+                    "sku": {"type": "string"},
+                    "upc": {"type": "string"},
+                    "ean": {"type": "string"},
+                    "gtin": {"type": "string"},
+                    "price": {"type": "string"},
+                    "pack_size": {"type": "string"},
+                    "case_pack": {"type": "string"},
+                    "image_url": {"type": "string"},
+                    "product_url": {"type": "string"},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["product_name"],
+            },
+        }
+    },
+    "required": ["products"],
+}
 
-# Model to use — gpt-4o-mini is cheap ($0.15/1M input, $0.60/1M output)
-# and excellent at structured extraction tasks.
-LLM_MODEL = "gpt-4o-mini"
+SYSTEM_PROMPT = """You extract product data from e-commerce, wholesale, distributor, and catalog pages.
 
-# Maximum tokens for the LLM response
-MAX_RESPONSE_TOKENS = 4096
+Return JSON with a top-level "products" array. Extract every real product visible in the provided content.
 
-# ── HTML cleaning ───────────────────────────────────────────────────────────────
+For each product, capture:
+product_name, brand, sku, upc, ean, gtin, price, pack_size, case_pack, image_url, product_url, confidence.
 
-# Tags to remove entirely (content and all)
-_REMOVE_TAGS = [
-    "script", "style", "noscript", "svg", "iframe", "video", "audio",
-    "canvas", "map", "object", "embed",
-]
+Rules:
+- Do not invent UPC, EAN, GTIN, price, SKU, or brand values.
+- Preserve barcode digits exactly when shown.
+- Use empty strings for missing fields.
+- Ignore navigation, filters, category names, account links, wishlists, carts, ads, and result-count summaries.
+- If content only shows product links or cards without barcodes, still return product rows with the fields that are visible.
+- If no real products are present, return {"products": []}.
+"""
 
-# Tags that are site chrome, not product content
-_CHROME_TAGS = ["nav", "header", "footer", "aside", "menu"]
 
-# Attributes to strip (reduce token waste on styling/tracking)
-_STRIP_ATTRS = [
-    "style", "class", "id", "data-gtm", "data-analytics", "data-track",
-    "data-testid", "data-cy", "data-test", "aria-label", "aria-describedby",
-    "onclick", "onload", "onerror",
-]
+def enabled() -> bool:
+    return bool(api_key()) and os.environ.get("SCRAPEBUDDY_OPENAI_DISABLED") != "1"
+
+
+def api_key() -> str:
+    return os.environ.get("OPENAI_API_KEY", "").strip()
+
+
+def model_name() -> str:
+    return os.environ.get("SCRAPEBUDDY_OPENAI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, ""))
+        return value if value > 0 else default
+    except Exception:
+        return default
 
 
 def _clean_html(html: str) -> str:
-    """
-    Clean HTML to reduce token count while preserving product-relevant content.
+    from bs4 import BeautifulSoup, Comment
 
-    Removes: scripts, styles, SVGs, navigation chrome, tracking attributes.
-    Preserves: product cards, prices, images, links, text content.
-    """
-    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html or "", "html.parser")
 
-    soup = BeautifulSoup(html, "html.parser")
-
-    # Remove non-content tags
-    for tag_name in _REMOVE_TAGS:
+    for tag_name in (
+        "script",
+        "style",
+        "noscript",
+        "svg",
+        "iframe",
+        "video",
+        "audio",
+        "canvas",
+        "map",
+        "object",
+        "embed",
+    ):
         for tag in soup.find_all(tag_name):
             tag.decompose()
 
-    # Remove chrome/navigation elements
-    for tag_name in _CHROME_TAGS:
+    for tag_name in ("nav", "header", "footer", "aside", "menu"):
         for tag in soup.find_all(tag_name):
             tag.decompose()
 
-    # Strip noisy attributes from all remaining elements
+    noisy_attrs = (
+        "style",
+        "class",
+        "id",
+        "data-gtm",
+        "data-analytics",
+        "data-track",
+        "data-testid",
+        "data-cy",
+        "data-test",
+        "aria-label",
+        "aria-describedby",
+        "onclick",
+        "onload",
+        "onerror",
+    )
     for tag in soup.find_all(True):
-        for attr in _STRIP_ATTRS:
-            if attr in tag.attrs:
-                del tag.attrs[attr]
+        for attr in noisy_attrs:
+            tag.attrs.pop(attr, None)
 
-    # Remove HTML comments
-    from bs4 import Comment
-    for comment in soup.find_all(string=lambda t: isinstance(t, Comment)):
+    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
         comment.extract()
 
-    # Collapse whitespace
     text = str(soup)
     text = re.sub(r"\n\s*\n+", "\n", text)
     text = re.sub(r"[ \t]+", " ", text)
-
     return text.strip()
 
 
-# ── LLM extraction ─────────────────────────────────────────────────────────────
-
-_SYSTEM_PROMPT = """You are a product data extraction assistant. You will receive HTML from an e-commerce or wholesale product listing page. Extract ALL products visible on the page.
-
-Return a JSON array of objects. Each object must have these fields (use empty string "" if not found):
-- "product_name": the product title/description
-- "price": the price including currency symbol (e.g. "$9.99")
-- "sku": the SKU, item number, part number, or model number
-- "image_url": the product image URL (absolute or relative)
-- "product_url": the link to the product detail page (absolute or relative)
-- "brand": the brand or manufacturer name
-- "upc": the UPC/EAN/GTIN barcode number if visible
-
-Rules:
-- Extract EVERY product on the page, not just a sample
-- Return ONLY the JSON array, no other text or markdown
-- If no products are found, return an empty array: []
-- For prices, include the currency symbol
-- For URLs, preserve the exact href value from the HTML
-- Do not invent or guess data — only extract what's visible"""
+def _trim_content(content: str) -> str:
+    max_chars = _positive_int_env("SCRAPEBUDDY_LLM_MAX_CHARS", MAX_CONTENT_CHARS)
+    if len(content) <= max_chars:
+        return content
+    logger.info(f"[OpenAI] Trimming extraction input from {len(content)} to {max_chars} chars")
+    return content[:max_chars]
 
 
-def _call_llm(cleaned_html: str) -> str | None:
-    """
-    Send cleaned HTML to the LLM and get the extraction response.
-    Returns the response text, or None if the call fails.
-    """
+def _response_text(response: Any) -> str:
+    text = getattr(response, "output_text", None)
+    if isinstance(text, str) and text.strip():
+        return text
+
+    chunks: list[str] = []
+    for output in getattr(response, "output", []) or []:
+        for content in getattr(output, "content", []) or []:
+            value = getattr(content, "text", None)
+            if isinstance(value, str):
+                chunks.append(value)
+    return "\n".join(chunks).strip()
+
+
+def _call_responses_api(content: str, url: str, content_type: str) -> str | None:
     try:
         from openai import OpenAI
     except ImportError:
-        logger.error("[Tier2] openai package not installed")
+        logger.error("[OpenAI] openai package is not installed")
         return None
 
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        logger.error("[Tier2] OPENAI_API_KEY not set")
+    if not enabled():
+        logger.info("[OpenAI] OPENAI_API_KEY not set or OpenAI extraction disabled")
         return None
 
-    client = OpenAI(api_key=api_key)
-
-    # Truncate HTML to stay within token limits
-    if len(cleaned_html) > MAX_HTML_CHARS:
-        logger.info(
-            f"[Tier2] Truncating HTML from {len(cleaned_html)} to {MAX_HTML_CHARS} chars"
-        )
-        cleaned_html = cleaned_html[:MAX_HTML_CHARS]
+    client = OpenAI(api_key=api_key())
+    prompt = (
+        f"Source URL: {url}\n"
+        f"Content type: {content_type}\n\n"
+        f"Extract products from this content:\n\n{content}"
+    )
 
     try:
+        response = client.responses.create(
+            model=model_name(),
+            instructions=SYSTEM_PROMPT,
+            input=prompt,
+            max_output_tokens=_positive_int_env(
+                "SCRAPEBUDDY_OPENAI_MAX_OUTPUT_TOKENS",
+                MAX_RESPONSE_TOKENS,
+            ),
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "product_extraction",
+                    "schema": PRODUCT_RESPONSE_SCHEMA,
+                    "strict": False,
+                }
+            },
+            store=False,
+            timeout=_positive_int_env("SCRAPEBUDDY_OPENAI_TIMEOUT", 120),
+        )
+        return _response_text(response)
+    except Exception as e:
+        logger.warning(f"[OpenAI] Responses API extraction failed: {e}")
+        return _call_chat_completions(content, url, content_type)
+
+
+def _call_chat_completions(content: str, url: str, content_type: str) -> str | None:
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return None
+
+    try:
+        client = OpenAI(api_key=api_key())
         response = client.chat.completions.create(
-            model=LLM_MODEL,
+            model=model_name(),
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": SYSTEM_PROMPT},
                 {
                     "role": "user",
                     "content": (
-                        f"Extract all products from this HTML page.\n\n"
-                        f"<html>\n{cleaned_html}\n</html>"
+                        f"Source URL: {url}\n"
+                        f"Content type: {content_type}\n\n"
+                        f"Extract products from this content:\n\n{content}"
                     ),
                 },
             ],
-            max_tokens=MAX_RESPONSE_TOKENS,
-            temperature=0,
+            response_format={"type": "json_object"},
+            max_completion_tokens=_positive_int_env(
+                "SCRAPEBUDDY_OPENAI_MAX_OUTPUT_TOKENS",
+                MAX_RESPONSE_TOKENS,
+            ),
+            timeout=_positive_int_env("SCRAPEBUDDY_OPENAI_TIMEOUT", 120),
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""
     except Exception as e:
-        logger.error(f"[Tier2] LLM API call failed: {e}")
+        logger.warning(f"[OpenAI] Chat Completions extraction failed: {e}")
         return None
 
 
-def _parse_llm_response(response_text: str, base_url: str) -> list[dict]:
-    """
-    Parse the LLM's JSON response into a list of product dicts.
-    Handles common LLM output quirks (markdown fences, trailing commas).
-    """
-    if not response_text:
-        return []
-
-    # Strip markdown code fences if present
-    text = response_text.strip()
+def _loads_json(text: str) -> Any:
+    text = (text or "").strip()
     if text.startswith("```"):
-        # Remove opening fence (```json or ```)
         text = re.sub(r"^```\w*\n?", "", text)
-        # Remove closing fence
-        text = re.sub(r"\n?```$", "", text)
-        text = text.strip()
+        text = re.sub(r"\n?```$", "", text).strip()
 
-    # Try to find a JSON array in the response
-    # Sometimes the LLM wraps it in an object like {"products": [...]}
     try:
-        data = json.loads(text)
+        return json.loads(text)
     except json.JSONDecodeError:
-        # Try to extract JSON array from the text
-        match = re.search(r"\[[\s\S]*\]", text)
-        if match:
+        object_match = re.search(r"\{[\s\S]*\}", text)
+        array_match = re.search(r"\[[\s\S]*\]", text)
+        for match in (object_match, array_match):
+            if not match:
+                continue
             try:
-                data = json.loads(match.group(0))
+                return json.loads(match.group(0))
             except json.JSONDecodeError:
-                logger.warning("[Tier2] Could not parse LLM response as JSON")
-                return []
-        else:
-            logger.warning("[Tier2] No JSON array found in LLM response")
-            return []
+                continue
+    return None
 
-    # Handle {"products": [...]} wrapper
-    if isinstance(data, dict):
-        for key in ["products", "items", "results", "data"]:
-            if key in data and isinstance(data[key], list):
-                data = data[key]
-                break
-        else:
-            return []
 
-    if not isinstance(data, list):
+def _products_from_parsed_json(value: Any) -> list[dict]:
+    if isinstance(value, dict):
+        for key in ("products", "items", "results", "data"):
+            if isinstance(value.get(key), list):
+                return [item for item in value[key] if isinstance(item, dict)]
+        return []
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _parse_llm_response(response_text: str, base_url: str) -> list[dict]:
+    parsed = _loads_json(response_text)
+    raw_products = _products_from_parsed_json(parsed)
+    if not raw_products:
         return []
 
-    # Normalize each product
-    products = []
-    for item in data:
-        if not isinstance(item, dict):
+    products: list[dict] = []
+    seen: set[str] = set()
+    for item in raw_products:
+        product = {
+            "product_name": item.get("product_name") or item.get("name") or item.get("title") or "",
+            "brand": item.get("brand") or item.get("manufacturer") or "",
+            "sku": (
+                item.get("sku")
+                or item.get("item_number")
+                or item.get("itemNumber")
+                or item.get("part_number")
+                or item.get("model")
+                or ""
+            ),
+            "upc": item.get("upc") or "",
+            "ean": item.get("ean") or "",
+            "gtin": item.get("gtin") or "",
+            "price": item.get("price") or "",
+            "pack_size": item.get("pack_size") or item.get("packSize") or "",
+            "case_pack": item.get("case_pack") or item.get("casePack") or "",
+            "image_url": item.get("image_url") or item.get("imageUrl") or item.get("image") or "",
+            "product_url": item.get("product_url") or item.get("productUrl") or item.get("url") or "",
+            "_source": "openai_llm",
+        }
+
+        for key in list(product.keys()):
+            if isinstance(product[key], str):
+                product[key] = re.sub(r"\s+", " ", product[key]).strip()
+
+        if product["image_url"]:
+            product["image_url"] = urljoin(base_url, str(product["image_url"]))
+        if product["product_url"]:
+            product["product_url"] = urljoin(base_url, str(product["product_url"]))
+
+        name = str(product["product_name"] or "").strip()
+        if not name or re.search(r"^\d[\d,]*\s+(?:results?|items?|products?)\s+for\b", name, re.I):
             continue
 
-        product = {}
-
-        # Map LLM field names to our standard fields
-        name = (
-            item.get("product_name", "")
-            or item.get("name", "")
-            or item.get("title", "")
-        )
-        if not name:
+        key = product["product_url"] or product["sku"] or f"{name}|{product['price']}"
+        if key in seen:
             continue
-        product["product_name"] = str(name).strip()
-
-        # Price
-        price = item.get("price", "")
-        if price and price != "":
-            product["price"] = str(price).strip()
-
-        # SKU
-        sku = (
-            item.get("sku", "")
-            or item.get("item_number", "")
-            or item.get("part_number", "")
-            or item.get("model", "")
-        )
-        if sku and sku != "":
-            product["sku"] = str(sku).strip()
-
-        # Image URL — resolve relative URLs
-        img = item.get("image_url", "") or item.get("image", "")
-        if img and img != "":
-            product["image_url"] = urljoin(base_url, str(img).strip())
-
-        # Product URL — resolve relative URLs
-        purl = item.get("product_url", "") or item.get("url", "") or item.get("link", "")
-        if purl and purl != "":
-            product["product_url"] = urljoin(base_url, str(purl).strip())
-
-        # Brand
-        brand = item.get("brand", "") or item.get("manufacturer", "")
-        if brand and brand != "":
-            product["brand"] = str(brand).strip()
-
-        # UPC
-        upc = item.get("upc", "") or item.get("gtin", "") or item.get("ean", "")
-        if upc and upc != "":
-            product["upc"] = str(upc).strip()
-
-        product["_source"] = "llm"
+        seen.add(key)
         products.append(product)
 
+    return normalize_products(products)
+
+
+def extract_from_text(content: str, url: str, *, content_type: str = "text") -> list[dict]:
+    logger.info(f"[OpenAI] Starting LLM extraction for {url} ({content_type})")
+    content = _trim_content(content or "")
+    if len(content.strip()) < 80:
+        logger.info("[OpenAI] Content too short for extraction")
+        return []
+
+    response_text = _call_responses_api(content, url, content_type)
+    if not response_text:
+        return []
+
+    products = _parse_llm_response(response_text, url)
+    logger.info(f"[OpenAI] Extracted {len(products)} product(s)")
     return products
 
-
-# ── Public API ──────────────────────────────────────────────────────────────────
 
 def extract(html: str, url: str) -> list[dict]:
-    """
-    Tier 2: Extract products using LLM-assisted analysis.
-
-    Cleans and truncates the HTML, sends it to gpt-4o-mini, and parses
-    the structured JSON response.
-
-    Returns:
-        List of product dicts. Empty list if extraction fails or finds nothing.
-    """
-    logger.info(f"[Tier2] Starting LLM extraction for {url}")
-
-    # Clean HTML to reduce tokens
     cleaned = _clean_html(html)
     logger.info(
-        f"[Tier2] Cleaned HTML: {len(html)} -> {len(cleaned)} chars "
-        f"({100 - len(cleaned) * 100 // max(len(html), 1)}% reduction)"
+        f"[OpenAI] Cleaned HTML: {len(html or '')} -> {len(cleaned)} chars"
     )
-
-    if len(cleaned) < 100:
-        logger.warning("[Tier2] Cleaned HTML too short — likely empty page")
-        return []
-
-    # Call LLM
-    response_text = _call_llm(cleaned)
-    if not response_text:
-        logger.warning("[Tier2] LLM returned no response")
-        return []
-
-    # Parse response
-    products = _parse_llm_response(response_text, url)
-    logger.info(f"[Tier2] LLM extracted {len(products)} product(s)")
-
-    return products
+    return extract_from_text(cleaned, url, content_type="cleaned_html")

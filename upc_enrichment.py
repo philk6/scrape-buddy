@@ -3,6 +3,8 @@ upc_enrichment.py — UPC enrichment + product identity resolution pipeline
 """
 
 import logging
+import os
+import time
 
 from identity_resolution import enrich_identity
 from identity_strengthening import strengthen_identity
@@ -14,6 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 _CONFIDENCE_RANK = {"high": 3, "medium": 2, "low": 1, "": 0}
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, ""))
+        return value if value > 0 else default
+    except Exception:
+        return default
 
 
 def _confidence_ok(confidence: str, min_confidence: str) -> bool:
@@ -32,6 +42,11 @@ def enrich_products_upc(products: list, providers: list = None, min_confidence: 
     already_count = 0
     provider_unavailable_count = 0
     insufficient_data_count = 0
+    skipped_budget_count = 0
+    max_seconds = _positive_int_env("SCRAPEBUDDY_UPC_ENRICHMENT_MAX_SECONDS", 45)
+    max_rows = _positive_int_env("SCRAPEBUDDY_UPC_ENRICHMENT_MAX_ROWS", 20)
+    started_at = time.monotonic()
+    external_rows_attempted = 0
 
     ordered_products = sorted(products, key=row_strength, reverse=True)
 
@@ -70,6 +85,21 @@ def enrich_products_upc(products: list, providers: list = None, min_confidence: 
             product["resolution_reason"] = "insufficient product identity data for external UPC resolution"
             insufficient_data_count += 1
             continue
+
+        if (
+            external_rows_attempted >= max_rows
+            or time.monotonic() - started_at > max_seconds
+        ):
+            product["upc_enriched"] = "0"
+            product["missing_upc"] = "1"
+            product["resolution_status"] = "external_lookup_skipped_budget"
+            product["resolution_reason"] = (
+                "external UPC lookup skipped because the run reached its "
+                "configured enrichment budget"
+            )
+            skipped_budget_count += 1
+            continue
+        external_rows_attempted += 1
 
         candidates = []
         provider_failures = []
@@ -146,5 +176,6 @@ def enrich_products_upc(products: list, providers: list = None, min_confidence: 
 
     logger.info(
         f"[UpcEnrichment] Complete - {already_count} supplier/native UPCs | {enriched_count} externally resolved | {provider_unavailable_count} provider unavailable | {insufficient_data_count} insufficient data | {missing_count} no match"
+        f" | {skipped_budget_count} skipped by budget"
     )
     return products

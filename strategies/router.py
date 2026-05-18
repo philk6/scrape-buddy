@@ -77,7 +77,7 @@ def _try_firecrawl_fallback(url: str, reason_prefix: str = "") -> dict | None:
         return None
 
     reason = (
-        f"{reason_prefix}; Firecrawl hosted JSON extraction returned "
+        f"{reason_prefix}; Firecrawl hosted rendered extraction returned "
         f"{len(products)} product(s)"
     ).strip("; ")
     return _result(

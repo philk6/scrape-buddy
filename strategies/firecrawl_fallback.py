@@ -1,10 +1,11 @@
 """
 Firecrawl hosted extraction strategy.
 
-When FIRECRAWL_API_KEY is configured, public catalog scrapes can use Firecrawl
-as the primary extraction pass or as a fallback, depending on router settings.
-It is not used for authenticated supplier sessions because Firecrawl does not
-automatically inherit the user's local browser cookies.
+When FIRECRAWL_API_KEY is configured, Scraper Buddy can use Firecrawl as a
+hosted rendering pass. By default we request markdown and links, then parse
+product cards locally; Firecrawl's schema JSON extraction can be enabled with
+SCRAPEBUDDY_FIRECRAWL_JSON=1, but it is slower and can time out on large
+catalog pages.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from .product_quality import normalize_products
 logger = logging.getLogger(__name__)
 
 ID = 40
-NAME = "Firecrawl JSON Extraction"
+NAME = "Firecrawl Rendered Extraction"
 
 API_URL = "https://api.firecrawl.dev/v2/scrape"
 
@@ -48,6 +49,7 @@ PRODUCT_SCHEMA = {
                     "image_url": {"type": "string"},
                     "product_url": {"type": "string"},
                 },
+                "required": ["product_name"],
             },
         }
     },
@@ -71,6 +73,63 @@ AUTH_PROMPT = (
 )
 
 
+_PRODUCT_URL_HINTS = (
+    "/product/",
+    "/products/",
+    "/item/",
+    "/items/",
+    "/detail/",
+    "/details/",
+    "/pd/",
+    "/p/",
+    "/sku/",
+    "/prod/",
+    "/catalog/product/",
+    "/shop/product/",
+    "/gp/product/",
+    "/dp/",
+)
+
+_NON_PRODUCT_URL_FRAGMENTS = (
+    "/account",
+    "/about",
+    "/basket",
+    "/blog",
+    "/brand",
+    "/brands",
+    "/cart",
+    "/category",
+    "/categories",
+    "/checkout",
+    "/collection",
+    "/collections",
+    "/contact",
+    "/customer",
+    "/faq",
+    "/help",
+    "/login",
+    "/logout",
+    "/my-account",
+    "/privacy",
+    "/register",
+    "/registration",
+    "/search",
+    "/signin",
+    "/signup",
+    "/terms",
+    "/wishlist",
+)
+
+_MARKDOWN_CARD_RE = re.compile(
+    r"(?ms)^\s*\d+\.\s+\[!\[(?P<image_alt>[^\]]*)\]\((?P<image_url>[^)]+)\)\]\((?P<url>[^)]+)\)"
+    r"(?P<body>.*?)(?=^\s*\d+\.\s+\[!\[|\Z)"
+)
+
+_MARKDOWN_HEADING_LINK_RE = re.compile(
+    r"(?m)^\s*#{1,4}\s+\[(?P<name>[^\]]+)\]\((?P<url>[^)]+)\)"
+)
+
+
 def enabled() -> bool:
     return bool(api_key()) and os.environ.get("SCRAPEBUDDY_FIRECRAWL_DISABLED") != "1"
 
@@ -87,6 +146,16 @@ def _timeout_seconds() -> int:
         return 120
 
 
+def _json_extraction_enabled() -> bool:
+    return os.environ.get("SCRAPEBUDDY_FIRECRAWL_JSON", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+        "enabled",
+    }
+
+
 def _walk_json(value: Any):
     if isinstance(value, dict):
         yield value
@@ -95,6 +164,232 @@ def _walk_json(value: Any):
     elif isinstance(value, list):
         for item in value:
             yield from _walk_json(item)
+
+
+def _extract_link_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("href", "url", "link"):
+            candidate = value.get(key)
+            if isinstance(candidate, str):
+                return candidate
+    return ""
+
+
+def _normalize_url_for_key(value: str) -> str:
+    parsed = urlparse(value or "")
+    path = re.sub(r"/+$", "", parsed.path or "/")
+    return parsed._replace(path=path, fragment="").geturl()
+
+
+def _name_from_url(value: str) -> str:
+    path = urlparse(value or "").path
+    slug = re.sub(r"\.(?:html?|aspx?|php)$", "", path.rstrip("/").split("/")[-1], flags=re.I)
+    slug = re.sub(r"[-_]+", " ", slug).strip()
+    if not slug or slug.lower() in {"product", "products", "item", "items", "detail", "details"}:
+        return ""
+    return slug.title()
+
+
+def _clean_markdown_text(value: str) -> str:
+    value = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", value or "")
+    value = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", value)
+    value = re.sub(r"[*_`#>]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _same_host(value: str, base_url: str) -> bool:
+    parsed = urlparse(value or "")
+    base = urlparse(base_url or "")
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc) and (
+        not base.netloc or parsed.netloc.lower() == base.netloc.lower()
+    )
+
+
+def _allowed_markdown_product_url(value: str, base_url: str) -> bool:
+    normalized = _normalize_url_for_key(value).lower()
+    if not _same_host(value, base_url):
+        return False
+    if normalized == _normalize_url_for_key(base_url).lower():
+        return False
+    return not any(fragment in normalized for fragment in _NON_PRODUCT_URL_FRAGMENTS)
+
+
+def _extract_sku_from_card_body(value: str) -> str:
+    for raw_line in (value or "").splitlines():
+        line = _clean_markdown_text(raw_line)
+        if not line or line.lower() in {"add to wish list", "in cart", "add to cart"}:
+            continue
+        if re.fullmatch(r"[A-Z0-9][A-Z0-9._-]{1,30}", line, re.I):
+            return line
+    return ""
+
+
+def _extract_price_from_text(value: str) -> str:
+    match = re.search(r"(?<!\w)\$\s?\d[\d,]*(?:\.\d{2})?", value or "")
+    return re.sub(r"\s+", "", match.group(0)) if match else ""
+
+
+def _looks_like_product_url(value: str, base_url: str) -> bool:
+    parsed = urlparse(value or "")
+    base = urlparse(base_url or "")
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+    if base.netloc and parsed.netloc.lower() != base.netloc.lower():
+        return False
+
+    normalized = _normalize_url_for_key(value).lower()
+    if normalized == _normalize_url_for_key(base_url).lower():
+        return False
+    if any(fragment in normalized for fragment in _NON_PRODUCT_URL_FRAGMENTS):
+        return False
+    return any(hint in normalized for hint in _PRODUCT_URL_HINTS)
+
+
+def _product_link_candidates_from_response(payload: dict, base_url: str) -> list[dict]:
+    data = payload.get("data") if isinstance(payload, dict) else None
+    links = data.get("links") if isinstance(data, dict) else None
+    if not isinstance(links, list):
+        return []
+
+    products: list[dict] = []
+    seen: set[str] = set()
+    for raw_link in links:
+        href = _extract_link_value(raw_link).strip()
+        if not href or href.startswith(("mailto:", "tel:", "javascript:", "#")):
+            continue
+        absolute = urljoin(base_url, href)
+        if not _looks_like_product_url(absolute, base_url):
+            continue
+        key = _normalize_url_for_key(absolute)
+        if key in seen:
+            continue
+        seen.add(key)
+        products.append(
+            {
+                "product_name": _name_from_url(absolute),
+                "product_url": absolute,
+            }
+        )
+    return products
+
+
+def _dedupe_merge_products(products: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    index: dict[str, int] = {}
+    for product in products:
+        name = str(product.get("product_name") or "").strip()
+        url = str(product.get("product_url") or "").strip()
+        sku = str(product.get("sku") or "").strip()
+        price = str(product.get("price") or "").strip()
+        key = _normalize_url_for_key(url) if url else sku or f"{name.lower()}|{price}"
+        if not key:
+            continue
+        if key in index:
+            existing = merged[index[key]]
+            for field, value in product.items():
+                if value and not existing.get(field):
+                    existing[field] = value
+            continue
+        index[key] = len(merged)
+        merged.append(product)
+    return merged
+
+
+def _merge_product_lists(primary: list[dict], supplemental: list[dict]) -> list[dict]:
+    return _dedupe_merge_products((primary or []) + (supplemental or []))
+
+
+def _extract_products_from_markdown(payload: dict, base_url: str) -> list[dict]:
+    data = payload.get("data") if isinstance(payload, dict) else None
+    markdown = data.get("markdown") if isinstance(data, dict) else None
+    if not isinstance(markdown, str) or not markdown.strip():
+        return []
+
+    products: list[dict] = []
+    seen_urls: set[str] = set()
+    heading_names_by_url: dict[str, str] = {}
+    for heading in _MARKDOWN_HEADING_LINK_RE.finditer(markdown):
+        absolute = urljoin(base_url, heading.group("url").strip())
+        heading_names_by_url[_normalize_url_for_key(absolute)] = _clean_markdown_text(
+            heading.group("name")
+        )
+
+    for match in _MARKDOWN_CARD_RE.finditer(markdown):
+        absolute = urljoin(base_url, match.group("url").strip())
+        if not _allowed_markdown_product_url(absolute, base_url):
+            continue
+        key = _normalize_url_for_key(absolute)
+        if key in seen_urls:
+            continue
+        seen_urls.add(key)
+        body = match.group("body") or ""
+        name = heading_names_by_url.get(key) or _clean_markdown_text(match.group("image_alt"))
+        if not name:
+            name = _name_from_url(absolute)
+        if not name or re.search(r"^\d[\d,]*\s+(?:results?|items?|products?)\s+for\b", name, re.I):
+            continue
+        products.append(
+            {
+                "product_name": name,
+                "sku": _extract_sku_from_card_body(body),
+                "price": _extract_price_from_text(body),
+                "image_url": urljoin(base_url, match.group("image_url").strip()),
+                "product_url": absolute,
+            }
+        )
+
+    return products
+
+
+def _markdown_from_response(payload: dict) -> str:
+    data = payload.get("data") if isinstance(payload, dict) else None
+    markdown = data.get("markdown") if isinstance(data, dict) else ""
+    return markdown if isinstance(markdown, str) else ""
+
+
+def _openai_mode() -> str:
+    return os.environ.get("SCRAPEBUDDY_FIRECRAWL_OPENAI", "auto").strip().lower()
+
+
+def _should_try_openai(payload: dict, products: list[dict]) -> bool:
+    mode = _openai_mode()
+    if mode in {"0", "off", "disabled", "none", "never"}:
+        return False
+    if not _markdown_from_response(payload):
+        return False
+    try:
+        from . import llm_extractor
+        if not llm_extractor.enabled():
+            return False
+    except Exception:
+        return False
+    if mode in {"1", "true", "yes", "on", "always"}:
+        return True
+    if not products:
+        return True
+    useful_rows = [
+        p for p in products
+        if p.get("product_name") and (p.get("product_url") or p.get("sku") or p.get("price"))
+    ]
+    return len(useful_rows) < 3
+
+
+def _extract_products_with_openai(payload: dict, base_url: str) -> list[dict]:
+    try:
+        from . import llm_extractor
+        markdown = _markdown_from_response(payload)
+        if not markdown:
+            return []
+        return llm_extractor.extract_from_text(
+            markdown,
+            base_url,
+            content_type="firecrawl_markdown",
+        )
+    except Exception as e:
+        logger.warning(f"[Firecrawl] OpenAI markdown extraction failed: {e}")
+        return []
 
 
 def _extract_products_from_response(payload: dict, base_url: str) -> list[dict]:
@@ -145,6 +440,11 @@ def _extract_products_from_response(payload: dict, base_url: str) -> list[dict]:
         seen.add(key)
         cleaned.append(product)
 
+    cleaned = _dedupe_merge_products(cleaned + _extract_products_from_markdown(payload, base_url))
+
+    if not cleaned:
+        cleaned.extend(_product_link_candidates_from_response(payload, base_url))
+
     return normalize_products(cleaned)
 
 
@@ -178,33 +478,46 @@ def _cookie_header_from_state_file(state_file: str, url: str) -> str:
 
 
 def _request_body(url: str, *, authenticated: bool = False) -> dict:
-    return {
-        "url": url,
-        "formats": [
+    # Firecrawl's markdown and links formats are much more reliable for large
+    # catalog pages than schema JSON extraction. JSON stays opt-in because it
+    # can time out on product grids that render successfully.
+    formats: list[Any] = ["markdown", "links"]
+    if _json_extraction_enabled():
+        formats.append(
             {
                 "type": "json",
                 "schema": PRODUCT_SCHEMA,
                 "prompt": AUTH_PROMPT if authenticated else PROMPT,
             }
-        ],
+        )
+
+    return {
+        "url": url,
+        "formats": formats,
         "onlyMainContent": False,
-        "waitFor": 3000,
+        "maxAge": 0,
+        "waitFor": 5000,
         "timeout": _timeout_seconds() * 1000,
         "removeBase64Images": True,
         "blockAds": True,
         "proxy": "auto",
         "actions": [
-            {"type": "wait", "milliseconds": 1500},
+            {"type": "wait", "milliseconds": 2000},
             {"type": "scroll"},
         ],
     }
 
 
-def run(url: str, *, headers_override: dict | None = None, authenticated: bool = False) -> list[dict]:
+def scrape_payload(
+    url: str,
+    *,
+    headers_override: dict | None = None,
+    authenticated: bool = False,
+) -> dict | None:
     key = api_key()
     if not key:
         logger.info("[Firecrawl] FIRECRAWL_API_KEY not set; skipping")
-        return []
+        return None
 
     body = _request_body(url, authenticated=authenticated)
     if headers_override:
@@ -224,12 +537,39 @@ def run(url: str, *, headers_override: dict | None = None, authenticated: bool =
             timeout=_timeout_seconds(),
         )
         response.raise_for_status()
-        payload = response.json()
+        return response.json()
     except Exception as e:
         logger.warning(f"[Firecrawl] Request failed: {e}")
+        return None
+
+
+def extract_products_from_payload(payload: dict, url: str) -> list[dict]:
+    products = _extract_products_from_response(payload, url)
+    if _should_try_openai(payload, products):
+        openai_products = _extract_products_with_openai(payload, url)
+        if openai_products:
+            before = len(products)
+            products = _merge_product_lists(products, openai_products)
+            logger.info(
+                f"[Firecrawl] OpenAI markdown extraction added "
+                f"{len(products) - before} product(s)"
+            )
+    return products
+
+
+def run(url: str, *, headers_override: dict | None = None, authenticated: bool = False) -> list[dict]:
+    payload = scrape_payload(
+        url,
+        headers_override=headers_override,
+        authenticated=authenticated,
+    )
+    if not payload:
         return []
 
-    products = _extract_products_from_response(payload, url)
+    products = extract_products_from_payload(payload, url)
+    warning = (payload.get("data") or {}).get("warning") if isinstance(payload, dict) else ""
+    if warning:
+        logger.info(f"[Firecrawl] API warning: {warning}")
     logger.info(f"[Firecrawl] Extracted {len(products)} product(s)")
     return products
 
