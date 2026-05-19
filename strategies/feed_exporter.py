@@ -41,6 +41,12 @@ def _positive_int_env(name: str, default: int) -> int:
         return default
 
 
+def _sleep_before_detail_request() -> None:
+    delay_ms = _positive_int_env("SCRAPEBUDDY_FEED_DETAIL_DELAY_MS", 150)
+    if delay_ms:
+        time.sleep(delay_ms / 1000)
+
+
 def _root_url(url: str) -> str:
     parsed = urlparse(url)
     return f"{parsed.scheme}://{parsed.netloc}"
@@ -135,9 +141,9 @@ def _enrich_rows_from_detail_pages(
     if not missing or os.environ.get("SCRAPEBUDDY_FEED_DETAIL_ENRICHMENT", "1") == "0":
         return 0
 
-    max_products = _positive_int_env("SCRAPEBUDDY_FEED_DETAIL_MAX_PRODUCTS", 5000)
+    max_products = _positive_int_env("SCRAPEBUDDY_FEED_DETAIL_MAX_PRODUCTS", 10000)
     missing = missing[:max_products]
-    concurrency = _positive_int_env("SCRAPEBUDDY_FEED_CONCURRENCY", 8)
+    concurrency = _positive_int_env("SCRAPEBUDDY_FEED_CONCURRENCY", 2)
 
     def fetch_and_enrich(row: dict) -> bool:
         from .detail import _extract_from_detail_page
@@ -146,7 +152,7 @@ def _enrich_rows_from_detail_pages(
         if not product_url:
             return False
         before_upc = row.get("upc") or ""
-        page_html = _fetch_text(session, product_url, timeout=30)
+        page_html = _fetch_detail_text(session, product_url)
         detail = _extract_from_detail_page(page_html, product_url)
         changed = False
         for key in (
@@ -277,6 +283,18 @@ def _fetch_text(session: requests.Session, url: str, timeout: int = 20) -> str:
     return response.text
 
 
+def _fetch_detail_text(session: requests.Session, url: str, attempts: int = 3) -> str:
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            _sleep_before_detail_request()
+            return _fetch_text(session, url, timeout=30)
+        except Exception as e:
+            last_error = e
+            time.sleep(0.5 * attempt)
+    raise last_error
+
+
 def _fetch_json(session: requests.Session, url: str, attempts: int = 3) -> dict | None:
     last_error = None
     for attempt in range(1, attempts + 1):
@@ -401,9 +419,9 @@ def _enrich_missing_shopify_barcodes(
     if not missing or os.environ.get("SCRAPEBUDDY_FEED_DETAIL_ENRICHMENT", "1") == "0":
         return 0
 
-    max_products = _positive_int_env("SCRAPEBUDDY_FEED_DETAIL_MAX_PRODUCTS", 5000)
+    max_products = _positive_int_env("SCRAPEBUDDY_FEED_DETAIL_MAX_PRODUCTS", 10000)
     missing = missing[:max_products]
-    concurrency = _positive_int_env("SCRAPEBUDDY_FEED_CONCURRENCY", 8)
+    concurrency = _positive_int_env("SCRAPEBUDDY_FEED_CONCURRENCY", 2)
     checked = 0
 
     def fetch_and_enrich(product: dict) -> bool:
@@ -412,7 +430,7 @@ def _enrich_missing_shopify_barcodes(
             return False
         product_url = urljoin(root, f"/products/{handle}")
         before = sum(1 for variant in product.get("variants") or [] if _normalize_barcode(variant.get("barcode")))
-        page_html = _fetch_text(session, product_url, timeout=30)
+        page_html = _fetch_detail_text(session, product_url)
         _enrich_shopify_product_from_html(product, page_html)
         after = sum(1 for variant in product.get("variants") or [] if _normalize_barcode(variant.get("barcode")))
         return after > before
