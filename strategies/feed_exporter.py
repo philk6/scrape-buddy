@@ -161,7 +161,7 @@ def _enrich_rows_from_detail_pages(
         upc, source = _detail_identifier_value(detail)
         if upc and not before_upc:
             row["upc"] = upc
-            row["upc_source"] = f"{platform}_detail_{source}"
+            row["upc_source"] = f"detail_{source}"
             row["upc_enriched"] = "1"
             row["missing_upc"] = "0"
             changed = True
@@ -322,7 +322,7 @@ def _fetch_shopify_products(session: requests.Session, feed_base: str) -> list[d
         if not isinstance(page_products, list) or not page_products:
             break
         products.extend(page_products)
-        logger.info(f"[FeedExport] Shopify feed page {page}: +{len(page_products)} product(s)")
+        logger.info(f"[FeedExport] Product feed page {page}: +{len(page_products)} product(s)")
         if len(page_products) < 250:
             break
     return products
@@ -427,7 +427,7 @@ def _enrich_missing_shopify_barcodes(
                 product = futures[future]
                 logger.debug(f"[FeedExport] Detail enrichment failed for {product.get('handle')}: {e}")
     logger.info(
-        f"[FeedExport] Shopify detail enrichment checked {len(missing)} product(s); "
+        f"[FeedExport] Product detail enrichment checked {len(missing)} product(s); "
         f"{checked} gained barcode data"
     )
     return checked
@@ -479,7 +479,7 @@ def _shopify_rows(products: list[dict], root: str) -> list[dict]:
                 ),
                 "source_product_id": str(product.get("id") or ""),
                 "source_variant_id": str(variant.get("id") or ""),
-                "source_platform": "shopify",
+                "source_platform": "Product feed",
                 "tags": tags_text,
                 "upc_source": "supplier_feed" if barcode else "",
                 "upc_enriched": "0",
@@ -521,7 +521,7 @@ def _run_shopify(url: str, state_file: str | None = None) -> dict | None:
             "image_url": sum(1 for row in rows if row.get("image_url")),
         },
         "feed": {
-            "platform": "shopify",
+            "platform": "Product feed",
             "feed_url": best_feed,
             "products_fetched": len(best_products),
             "rows": len(rows),
@@ -537,7 +537,7 @@ def _run_shopify(url: str, state_file: str | None = None) -> dict | None:
         "strategy_id": ID,
         "strategy_name": NAME,
         "reason": (
-            f"Detected Shopify product feed and exported {len(rows)} variant row(s) "
+            f"Detected product feed and exported {len(rows)} variant row(s) "
             f"from {len(best_products)} product record(s)"
         ),
         "products": rows,
@@ -556,7 +556,7 @@ def _fetch_woocommerce_products(session: requests.Session, root: str) -> tuple[l
         if not isinstance(payload, list) or not payload:
             break
         products.extend([item for item in payload if isinstance(item, dict)])
-        logger.info(f"[FeedExport] WooCommerce Store API page {page}: +{len(payload)} product(s)")
+        logger.info(f"[FeedExport] Store feed page {page}: +{len(payload)} product(s)")
         if len(payload) < 100:
             break
     return products, feed_base
@@ -598,7 +598,7 @@ def _woocommerce_identifier(product: dict) -> tuple[str, str]:
     for key in ("global_unique_id", "barcode", "upc", "ean", "gtin"):
         upc = _normalize_barcode(product.get(key))
         if _looks_like_identifier(upc):
-            return upc, f"woocommerce_{key}"
+            return upc, f"feed_{key}"
 
     for attribute in product.get("attributes") or []:
         if not isinstance(attribute, dict):
@@ -609,16 +609,16 @@ def _woocommerce_identifier(product: dict) -> tuple[str, str]:
         for value in _woocommerce_terms(attribute):
             upc = _normalize_barcode(value)
             if _looks_like_identifier(upc):
-                return upc, "woocommerce_attribute"
+                return upc, "feed_attribute"
 
     for field in ("description", "short_description"):
         upc = _identifier_from_text(product.get(field))
         if upc:
-            return upc, f"woocommerce_{field}"
+            return upc, f"feed_{field}"
 
     sku = _normalize_barcode(product.get("sku"))
     if _looks_like_identifier(sku):
-        return sku, "woocommerce_numeric_sku"
+        return sku, "numeric_sku"
     return "", ""
 
 
@@ -658,7 +658,7 @@ def _woocommerce_rows(products: list[dict], root: str) -> list[dict]:
             ),
             "source_product_id": str(product.get("id") or ""),
             "source_variant_id": "",
-            "source_platform": "woocommerce",
+            "source_platform": "Product feed",
             "tags": "; ".join(tag for tag in tags if tag),
             "upc_source": upc_source,
             "upc_enriched": "0",
@@ -676,7 +676,7 @@ def _run_woocommerce(url: str, state_file: str | None = None) -> dict | None:
         return None
 
     rows = _woocommerce_rows(products, root)
-    gained = _enrich_rows_from_detail_pages(session, rows, platform="woocommerce")
+    gained = _enrich_rows_from_detail_pages(session, rows, platform="feed")
     rows = normalize_products(rows)
     diagnostics = {
         "strategy_name": NAME,
@@ -691,7 +691,7 @@ def _run_woocommerce(url: str, state_file: str | None = None) -> dict | None:
             "image_url": sum(1 for row in rows if row.get("image_url")),
         },
         "feed": {
-            "platform": "woocommerce",
+            "platform": "Product feed",
             "feed_url": feed_url,
             "products_fetched": len(products),
             "rows": len(rows),
@@ -701,13 +701,13 @@ def _run_woocommerce(url: str, state_file: str | None = None) -> dict | None:
     }
     if diagnostics["counts"]["barcode"] < len(rows):
         diagnostics["warnings"].append(
-            "Some rows have no UPC/EAN/GTIN in the WooCommerce API or detail HTML."
+            "Some rows have no UPC/EAN/GTIN in the product feed or detail HTML."
         )
     return {
         "strategy_id": ID,
         "strategy_name": NAME,
         "reason": (
-            f"Detected WooCommerce Store API and exported {len(rows)} product row(s)"
+            f"Detected product feed and exported {len(rows)} product row(s)"
         ),
         "products": rows,
         "diagnostics": diagnostics,
@@ -726,15 +726,15 @@ def run(url: str, *, state_file: str | None = None) -> dict | None:
             )
             return result
     except Exception as e:
-        logger.info(f"[FeedExport] Shopify feed path unavailable: {e}")
+        logger.info(f"[FeedExport] Product feed path unavailable: {e}")
     try:
         result = _run_woocommerce(url, state_file=state_file)
         if result:
             logger.info(
-                f"[FeedExport] WooCommerce feed-first export succeeded: "
+                f"[FeedExport] Store feed-first export succeeded: "
                 f"{len(result.get('products', []))} row(s)"
             )
             return result
     except Exception as e:
-        logger.info(f"[FeedExport] WooCommerce feed path unavailable: {e}")
+        logger.info(f"[FeedExport] Store feed path unavailable: {e}")
     return None

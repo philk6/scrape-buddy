@@ -42,7 +42,7 @@ class FeedExporterTests(unittest.TestCase):
         self.assertEqual(rows[0]["availability"], "Unavailable")
         self.assertEqual(rows[0]["source_product_id"], "100")
         self.assertEqual(rows[0]["source_variant_id"], "200")
-        self.assertEqual(rows[0]["source_platform"], "shopify")
+        self.assertEqual(rows[0]["source_platform"], "Product feed")
 
     def test_enrich_shopify_product_from_html_reads_selected_variant_barcode(self):
         product = {
@@ -96,7 +96,7 @@ class FeedExporterTests(unittest.TestCase):
         self.assertEqual(rows[0]["description"], "Dark roast case.")
         self.assertEqual(rows[0]["availability"], "Available")
         self.assertEqual(rows[0]["source_product_id"], "300")
-        self.assertEqual(rows[0]["source_platform"], "woocommerce")
+        self.assertEqual(rows[0]["source_platform"], "Product feed")
 
 
 if __name__ == "__main__":

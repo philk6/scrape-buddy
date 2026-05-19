@@ -72,7 +72,7 @@ if os.environ.get("OPENAI_API_KEY"):
 CHAT_SYSTEM_PROMPT = """You are a helpful support assistant for Scraper Buddy.
 
 This tool lets users paste a supplier store, catalog, feed, or category URL and export spreadsheet-ready product data from it.
-It uses a feed-first path for supported platforms, then falls back to structured data, row/table catalogs, generic product cards, detail-page enrichment, LLM fallback, JavaScript rendering, and pagination traversal.
+It uses a feed-first path for supported catalog feeds, then falls back to structured data, row/table catalogs, generic product cards, detail-page enrichment, LLM fallback, JavaScript rendering, and pagination traversal.
 It extracts: product_name, brand, sku, upc/ean/gtin, price, pack_size, case_pack, image_url, product_url, and quality diagnostics.
 
 Key behaviours:
@@ -125,6 +125,12 @@ PRODUCT_FIELDS = [
     "source_product_id", "source_variant_id", "source_platform", "tags",
 ]
 
+PRODUCT_FIELD_LABELS = {
+    "source_product_id": "Source Product ID",
+    "source_variant_id": "Source Variant ID",
+    "source_platform": "Source Type",
+}
+
 
 def _normalise_product(p: dict) -> dict:
     """Ensure every product dict has every field, defaulting to ''."""
@@ -141,7 +147,7 @@ def _build_xlsx(run: dict) -> io.BytesIO:
     ws.title = "Products"
 
     # Header row
-    headers = [f.replace("_", " ").title() for f in PRODUCT_FIELDS]
+    headers = [PRODUCT_FIELD_LABELS.get(f, f.replace("_", " ").title()) for f in PRODUCT_FIELDS]
     ws.append(headers)
 
     # Style the header row: bold, gold fill, dark text
