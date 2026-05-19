@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>The Syndicate Amazon Mastery UPC Scraper</title>
+  <title>Scraper Buddy Product Spreadsheet Exporter</title>
   <style>
     /* ── Design tokens ── */
     :root {
@@ -746,6 +746,11 @@
     }
     #chatSendBtn:hover:not(:disabled) { opacity: 0.88; }
     #chatSendBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #chatToggle,
+    #chatPanel {
+      display: none !important;
+    }
   </style>
 </head>
 <body>
@@ -766,34 +771,34 @@
   <div class="main-content">
 
     <header>
-      <div class="header-eyebrow">The Syndicate · Amazon Mastery</div>
-      <h1>UPC Scraper</h1>
-      <p>Paste a supplier category page URL and click Scrape to extract product data.</p>
+      <div class="header-eyebrow">Scraper Buddy</div>
+      <h1>Product Spreadsheet Exporter</h1>
+      <p>Enter a store, catalog, or supplier URL. Scraper Buddy pulls product feeds first, enriches detail pages when needed, and builds a spreadsheet.</p>
     </header>
 
     <!-- Mode selector -->
     <div class="mode-selector">
       <button class="mode-btn active" id="modePublicBtn" onclick="setMode('public')">
-        Public Category Crawl
+        Public Site Export
       </button>
       <button class="mode-btn" id="modeLoginBtn" onclick="setMode('login')">
-        Login-Required Crawl
+        Login Site Export
       </button>
     </div>
 
     <div class="scraper-form">
 
-      <!-- ── Public Category Crawl panel ── -->
+      <!-- Public Site Export panel -->
       <div class="mode-panel active" id="panelPublic">
         <div class="input-row">
           <input
             type="url"
             id="urlInput"
-            placeholder="https://example.com/category/widgets"
+            placeholder="https://example.com/collections/all"
             autocomplete="off"
             spellcheck="false"
           />
-          <button id="scrapeBtn" onclick="runScrape()">Scrape</button>
+          <button id="scrapeBtn" onclick="runScrape()">Build Spreadsheet</button>
         </div>
         <div class="label-row">
           <label for="labelInput">Label (optional):</label>
@@ -806,7 +811,7 @@
         </div>
       </div>
 
-      <!-- ── Login-Required Crawl panel ── -->
+      <!-- Login Site Export panel -->
       <div class="mode-panel" id="panelLogin">
         <div class="field-group">
           <div class="field-label">Login URL</div>
@@ -821,7 +826,7 @@
           </div>
         </div>
         <div class="field-group">
-          <div class="field-label">Category / Listing URL (after login)</div>
+          <div class="field-label">Product feed / category URL (after login)</div>
           <div class="input-row">
             <input
               type="url"
@@ -845,7 +850,7 @@
         </div>
         <div class="login-actions">
           <button class="btn-secondary" id="startLoginBtn" onclick="startLoginSession()">
-            ⟢ Start Login Session
+            Start Login
           </button>
           <button
             class="btn-secondary"
@@ -854,7 +859,7 @@
             disabled
             style="background: linear-gradient(135deg, var(--gold) 0%, var(--gold-light) 100%); color: #0b0b0b; border: none; opacity: 0.4;"
           >
-            ▶ Continue Scrape After Login
+            Build Spreadsheet After Login
           </button>
         </div>
         <div id="loginStatus" class="login-status"></div>
@@ -881,7 +886,7 @@
       </div>
 
       <div id="diagnosticsPanel" class="diagnostics-panel">
-        <div class="diagnostics-title">Scrape Diagnostics</div>
+        <div class="diagnostics-title">Export Diagnostics</div>
         <div id="diagnosticsList" class="diagnostics-list"></div>
       </div>
 
@@ -1003,14 +1008,14 @@
       if (!response.ok || data.error) {
         setLoginStatus("Error: " + (data.error || "Unknown error."), "error");
         startBtn.disabled = false;
-        startBtn.textContent = "⟢ Start Login Session";
+        startBtn.textContent = "Start Login";
         return;
       }
 
       loginSessionId = data.session_id;
 
       setLoginStatus(
-        "Browser is open — log in to the supplier site, then click Continue Scrape After Login.",
+        "Browser is open. Log in to the supplier site, then click Build Spreadsheet After Login.",
         "waiting"
       );
       startBtn.textContent = "⟢ Browser Open";
@@ -1022,7 +1027,7 @@
     } catch (err) {
       setLoginStatus("Network error: " + err.message, "error");
       startBtn.disabled = false;
-      startBtn.textContent = "⟢ Start Login Session";
+      startBtn.textContent = "Start Login";
     }
   }
 
@@ -1035,7 +1040,7 @@
       setLoginStatus("Category URL must start with http:// or https://", "error"); return;
     }
     if (!loginSessionId) {
-      setLoginStatus("No active login session. Click Start Login Session first.", "error"); return;
+      setLoginStatus("No active login session. Click Start Login first.", "error"); return;
     }
 
     const startBtn    = document.getElementById("startLoginBtn");
@@ -1068,8 +1073,8 @@
       watchingRunIds.add(data.run_id);
 
       document.getElementById("strategyInfo").textContent = "";
-      setStatus(`Authenticated scrape running in background — "${data.label}"`, "loading");
-      setLoginStatus("Scrape started — results will appear when complete.", "ready");
+      setStatus(`Authenticated spreadsheet export running in background — "${data.label}"`, "loading");
+      setLoginStatus("Spreadsheet export started. Results will appear when complete.", "ready");
 
       loadHistory();
       setActiveHistory(currentRunId);
@@ -1079,9 +1084,9 @@
       setLoginStatus("Network error: " + err.message, "error");
       setStatus("Network error: " + err.message, "error");
     } finally {
-      continueBtn.textContent = "▶ Continue Scrape After Login";
+      continueBtn.textContent = "Build Spreadsheet After Login";
       startBtn.disabled = false;
-      startBtn.textContent = "⟢ Start Login Session";
+      startBtn.textContent = "Start Login";
       continueBtn.disabled = true;
       continueBtn.style.opacity = "0.4";
     }
@@ -1107,7 +1112,7 @@
 
     btn.disabled = true;
     btn.textContent = "Starting…";
-    setStatus("Fetching page and queuing scrape…", "loading");
+    setStatus("Starting feed-first spreadsheet export...", "loading");
     document.getElementById("resultsWrapper").style.display = "none";
 
     try {
@@ -1127,7 +1132,7 @@
       watchingRunIds.add(data.run_id);
 
       document.getElementById("strategyInfo").textContent = "";
-      setStatus(`Scrape running in background — "${data.label}"`, "loading");
+      setStatus(`Spreadsheet export running in background — "${data.label}"`, "loading");
 
       loadHistory();
       setActiveHistory(currentRunId);
@@ -1137,7 +1142,7 @@
       setStatus("Network error: " + err.message, "error");
     } finally {
       btn.disabled = false;
-      btn.textContent = "Scrape";
+      btn.textContent = "Build Spreadsheet";
     }
   }
 
@@ -1187,7 +1192,7 @@
             if (run.status === "completed") {
               await loadRun(run.id);
             } else {
-              setStatus(`Scrape failed: ${failureMessage(run)}`, "error");
+              setStatus(`Export failed: ${failureMessage(run)}`, "error");
               document.getElementById("resultsWrapper").style.display = "none";
             }
           }
@@ -1275,7 +1280,7 @@
       }
 
       if (run.status === "failed") {
-        setStatus(`Scrape failed: ${failureMessage(run)}`, "error");
+        setStatus(`Export failed: ${failureMessage(run)}`, "error");
         document.getElementById("resultsWrapper").style.display = "none";
         return;
       }
@@ -1564,6 +1569,21 @@
       }
       if (crawl.api_products_collected !== undefined) {
         diagnostics.push(['API Products', String(crawl.api_products_collected)]);
+      }
+      if (crawl.platform) {
+        diagnostics.push(['Feed Platform', crawl.platform]);
+      }
+      if (crawl.feed_url) {
+        diagnostics.push(['Feed URL', crawl.feed_url]);
+      }
+      if (crawl.products_fetched !== undefined) {
+        diagnostics.push(['Feed Products', String(crawl.products_fetched)]);
+      }
+      if (crawl.rows !== undefined) {
+        diagnostics.push(['Feed Rows', String(crawl.rows)]);
+      }
+      if (crawl.detail_products_gained_barcodes !== undefined) {
+        diagnostics.push(['Detail UPC Wins', String(crawl.detail_products_gained_barcodes)]);
       }
       if (crawl.stop_reason) {
         diagnostics.push(['Stop Reason', crawl.stop_reason]);

@@ -1,5 +1,5 @@
 """
-database.py — SQLite persistence for The Syndicate UPC Scraper
+database.py - SQLite persistence for Scraper Buddy product exports
 
 Tables:
   scrape_runs  — one row per scrape job (label, url, timestamp, strategy, count)
@@ -85,6 +85,14 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         ("scrape_items", "gtin",               "TEXT DEFAULT ''"),
         ("scrape_items", "barcode_raw",        "TEXT DEFAULT ''"),
         ("scrape_items", "identifier_type",    "TEXT DEFAULT ''"),
+        # feed-first spreadsheet fields
+        ("scrape_items", "category",           "TEXT DEFAULT ''"),
+        ("scrape_items", "description",        "TEXT DEFAULT ''"),
+        ("scrape_items", "availability",       "TEXT DEFAULT ''"),
+        ("scrape_items", "source_product_id",  "TEXT DEFAULT ''"),
+        ("scrape_items", "source_variant_id",  "TEXT DEFAULT ''"),
+        ("scrape_items", "source_platform",    "TEXT DEFAULT ''"),
+        ("scrape_items", "tags",               "TEXT DEFAULT ''"),
         # scrape_runs — job lifecycle columns (DEFAULT 'completed' keeps old rows valid)
         ("scrape_runs",  "status",        "TEXT DEFAULT 'completed'"),
         ("scrape_runs",  "started_at",    "TEXT DEFAULT ''"),
@@ -171,8 +179,10 @@ def save_scrape(
                 raw_pack_text, unit_measure, pack_confidence,
                 unit_size, unit_price, pricing_unit,
                 bulk_price, minimum_order_qty, raw_price_text, gtin_case,
-                ean, gtin, barcode_raw, identifier_type)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ean, gtin, barcode_raw, identifier_type,
+                category, description, availability, source_product_id,
+                source_variant_id, source_platform, tags)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 (
                     run_id,
@@ -205,6 +215,13 @@ def save_scrape(
                     p.get("gtin", ""),
                     p.get("barcode_raw", ""),
                     p.get("identifier_type", ""),
+                    p.get("category", ""),
+                    p.get("description", ""),
+                    p.get("availability", ""),
+                    p.get("source_product_id", ""),
+                    p.get("source_variant_id", ""),
+                    p.get("source_platform", ""),
+                    p.get("tags", ""),
                 )
                 for p in products
             ],
@@ -287,8 +304,10 @@ def complete_run(
                     raw_pack_text, unit_measure, pack_confidence,
                     unit_size, unit_price, pricing_unit,
                     bulk_price, minimum_order_qty, raw_price_text, gtin_case,
-                    ean, gtin, barcode_raw, identifier_type)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ean, gtin, barcode_raw, identifier_type,
+                    category, description, availability, source_product_id,
+                    source_variant_id, source_platform, tags)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (
                         run_id,
@@ -321,6 +340,13 @@ def complete_run(
                         p.get("gtin", ""),
                         p.get("barcode_raw", ""),
                         p.get("identifier_type", ""),
+                        p.get("category", ""),
+                        p.get("description", ""),
+                        p.get("availability", ""),
+                        p.get("source_product_id", ""),
+                        p.get("source_variant_id", ""),
+                        p.get("source_platform", ""),
+                        p.get("tags", ""),
                     )
                     for p in products
                 ],
@@ -420,7 +446,9 @@ def get_run(run_id: int) -> dict | None:
                       raw_pack_text, unit_measure, pack_confidence,
                       unit_size, unit_price, pricing_unit,
                       bulk_price, minimum_order_qty, raw_price_text, gtin_case,
-                      ean, gtin, barcode_raw, identifier_type
+                      ean, gtin, barcode_raw, identifier_type,
+                      category, description, availability, source_product_id,
+                      source_variant_id, source_platform, tags
                FROM scrape_items WHERE run_id = ? ORDER BY id""",
             (run_id,),
         ).fetchall()

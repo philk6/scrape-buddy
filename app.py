@@ -1,5 +1,5 @@
 """
-app.py — The Syndicate Amazon Mastery UPC Scraper — Flask server
+app.py - Scraper Buddy product spreadsheet exporter - Flask server
 
 Routes:
   GET  /                      → frontend
@@ -42,7 +42,7 @@ import upc_enrichment
 from scraper import fetch_html, debug_scrape, make_auth_fetch_fn
 from strategies import run_best_strategy
 from strategies.detail import run as detail_run
-from strategies import playwright_catalog, firecrawl_fallback
+from strategies import playwright_catalog, firecrawl_fallback, feed_exporter
 from strategies.pagination import dedup_products
 from strategies.product_quality import build_error_report, build_quality_report, normalize_products
 from upc_providers import default_providers
@@ -69,10 +69,10 @@ openai_client = None
 if os.environ.get("OPENAI_API_KEY"):
     openai_client = OpenAI()
 
-CHAT_SYSTEM_PROMPT = """You are a helpful support assistant for The Syndicate Amazon Mastery UPC Scraper.
+CHAT_SYSTEM_PROMPT = """You are a helpful support assistant for Scraper Buddy.
 
-This tool lets users paste a supplier category page URL and scrape product data from it.
-It uses layered extraction: structured data, row/table catalogs, generic product cards, detail-page enrichment, LLM fallback, JavaScript rendering, and pagination traversal.
+This tool lets users paste a supplier store, catalog, feed, or category URL and export spreadsheet-ready product data from it.
+It uses a feed-first path for supported platforms, then falls back to structured data, row/table catalogs, generic product cards, detail-page enrichment, LLM fallback, JavaScript rendering, and pagination traversal.
 It extracts: product_name, brand, sku, upc/ean/gtin, price, pack_size, case_pack, image_url, product_url, and quality diagnostics.
 
 Key behaviours:
@@ -82,14 +82,14 @@ Key behaviours:
 - Results can be exported to .xlsx from the results header or the History sidebar.
 
 Help users with:
-- How to use the tool (paste URL, optional label, click Scrape)
+- How to use the tool (paste URL, optional label, click Build Spreadsheet)
 - Why scraping might return no results (JavaScript-rendered sites, bot protection, unusual layouts)
 - What each extracted field means (UPC, SKU, pack size, case pack)
 - How to export results to Excel
 - How to view, rename, and delete saved scrapes in the History sidebar
 - Common issues (timeouts, empty results, missing UPC or case pack data)
 
-Keep answers short and practical. Do not refer to the app as Scrape Buddy — it is The Syndicate Amazon Mastery UPC Scraper."""
+Keep answers short and practical."""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -120,6 +120,9 @@ PRODUCT_FIELDS = [
     # Multi-supplier extraction fields
     "bulk_price", "minimum_order_qty", "raw_price_text",
     "gtin_case", "ean", "gtin", "barcode_raw", "identifier_type",
+    # Feed-first spreadsheet fields
+    "category", "description", "availability",
+    "source_product_id", "source_variant_id", "source_platform", "tags",
 ]
 
 
@@ -163,6 +166,34 @@ def _build_xlsx(run: dict) -> io.BytesIO:
                 if cell.value:
                     max_len = max(max_len, len(str(cell.value)))
         ws.column_dimensions[col_letter].width = min(max_len + 3, 50)
+
+    ws.freeze_panes = "A2"
+    try:
+        ws.auto_filter.ref = ws.dimensions
+    except Exception:
+        pass
+
+    summary = wb.create_sheet("Summary")
+    products = run.get("products", [])
+    summary_rows = [
+        ["Scrape Summary", ""],
+        ["Source", run.get("source_url", "")],
+        ["Strategy", run.get("strategy_name", "")],
+        ["Rows", len(products)],
+        ["Rows with UPC/EAN/GTIN", sum(1 for p in products if p.get("upc") or p.get("ean") or p.get("gtin"))],
+        ["Rows with SKU", sum(1 for p in products if p.get("sku"))],
+        ["Distinct brands", len({p.get("brand") for p in products if p.get("brand")})],
+        ["Distinct categories", len({c for p in products for c in str(p.get("category") or "").split("; ") if c})],
+    ]
+    for row in summary_rows:
+        summary.append(row)
+    summary["A1"].fill = gold_fill
+    summary["A1"].font = Font(bold=True, color="0B0B0B", size=14)
+    summary.merge_cells("A1:B1")
+    for cell in summary["A"]:
+        cell.font = Font(bold=True)
+    summary.column_dimensions["A"].width = 26
+    summary.column_dimensions["B"].width = 72
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -304,7 +335,27 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
     Calls database.complete_run() on success or database.fail_run() on error.
     """
     try:
-        result = None
+        result = feed_exporter.run(url)
+        if result:
+            logging.info(
+                f"[Job {run_id}] Feed-first export found "
+                f"{len(result.get('products', []))} row(s)"
+            )
+            feed_diag = (result.get("diagnostics") or {}).get("feed")
+            if isinstance(feed_diag, dict):
+                crawl_diag = dict(feed_diag)
+                crawl_diag.setdefault("stop_reason", result.get("reason", ""))
+                result.setdefault("_crawl_diagnostics", crawl_diag)
+        if result is None and not html:
+            try:
+                html = fetch_html(url)
+            except Exception as e:
+                logging.warning(
+                    f"[Job {run_id}] requests fetch failed after feed-first miss: {e}"
+                )
+                html = ""
+            use_playwright = _html_needs_browser_crawler(html)
+
         browser_crawl_attempt = {}
 
         firecrawl_mode = _firecrawl_mode()
@@ -314,7 +365,7 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
             and firecrawl_fallback.enabled()
             and firecrawl_mode not in {"0", "off", "disabled", "none", "never", "local_first"}
         )
-        if firecrawl_first and firecrawl_fallback.enabled():
+        if result is None and firecrawl_first and firecrawl_fallback.enabled():
             try:
                 firecrawl_products = firecrawl_fallback.run(url)
                 if firecrawl_products:
@@ -576,7 +627,18 @@ def _run_auth_scrape_worker(
         auth_firecrawl_mode = _auth_firecrawl_mode()
         firecrawl_first = auth_firecrawl_mode in {"first", "primary", "always", "firecrawl_first"}
 
-        if firecrawl_first and firecrawl_fallback.enabled():
+        feed_result = feed_exporter.run(url, state_file=state_file)
+        if feed_result:
+            products = feed_result.get("products", [])
+            strategy_id = feed_result.get("strategy_id", feed_exporter.ID)
+            strategy_name = feed_result.get("strategy_name", feed_exporter.NAME)
+            crawl_diagnostics = feed_result.get("diagnostics", {}).get("feed", {})
+            logging.info(
+                f"[Job {run_id}] Auth feed-first export found "
+                f"{len(products)} row(s)"
+            )
+
+        if not products and firecrawl_first and firecrawl_fallback.enabled():
             try:
                 products = firecrawl_fallback.run_authenticated(url, state_file)
                 if products:
@@ -688,44 +750,14 @@ def scrape():
 
     label = (data.get("label") or "").strip() or _auto_label(url)
 
-    # Fetch HTML synchronously — fast network call, not the slow part.
-    # Browser-heavy pages are handed to the background Playwright crawler below.
-    html = None
-
-    try:
-        html = fetch_html(url)
-    except Exception as e:
-        logging.warning(
-            f"[Scrape] requests fetch failed: {e} — background browser crawler will try"
-        )
-    use_browser_crawler = _html_needs_browser_crawler(html)
-    if use_browser_crawler:
-        logging.info(
-            "[Scrape] Browser crawler selected for public scrape "
-            "(empty/blocked/JS-rendered/static-incomplete page)"
-        )
-        run_id = database.create_run(label=label, source_url=url)
-        threading.Thread(
-            target=_run_scrape_worker,
-            args=(run_id, url, html or "", True),
-            daemon=True,
-            name=f"scrape-{run_id}",
-        ).start()
-        return jsonify({"run_id": run_id, "label": label, "status": "running"})
-
-    # Create the history record immediately so it shows up in the sidebar
     run_id = database.create_run(label=label, source_url=url)
-
-    # Launch the slow work (parsing + enrichment + DB write) in the background
     threading.Thread(
         target=_run_scrape_worker,
-        args=(run_id, url, html, False),
+        args=(run_id, url, "", False),
         daemon=True,
         name=f"scrape-{run_id}",
     ).start()
-
     return jsonify({"run_id": run_id, "label": label, "status": "running"})
-
 
 @app.route("/api/history", methods=["GET"])
 def history_list():
