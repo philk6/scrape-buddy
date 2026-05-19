@@ -33,6 +33,10 @@ HEADERS = {
 }
 
 
+class BlockedResponse(RuntimeError):
+    """Raised when a supplier returns a bot-check or blocked detail page."""
+
+
 def _positive_int_env(name: str, default: int) -> int:
     try:
         value = int(os.environ.get(name, ""))
@@ -42,9 +46,20 @@ def _positive_int_env(name: str, default: int) -> int:
 
 
 def _sleep_before_detail_request() -> None:
-    delay_ms = _positive_int_env("SCRAPEBUDDY_FEED_DETAIL_DELAY_MS", 150)
+    delay_ms = _positive_int_env("SCRAPEBUDDY_FEED_DETAIL_DELAY_MS", 75)
     if delay_ms:
         time.sleep(delay_ms / 1000)
+
+
+def _detail_concurrency() -> int:
+    profile = os.environ.get("SCRAPEBUDDY_FEED_SPEED_PROFILE", "balanced").strip().lower()
+    defaults = {
+        "accuracy": 2,
+        "balanced": 4,
+        "fast": 6,
+    }
+    default = defaults.get(profile, 4)
+    return min(_positive_int_env("SCRAPEBUDDY_FEED_CONCURRENCY", default), 12)
 
 
 def _root_url(url: str) -> str:
@@ -143,7 +158,7 @@ def _enrich_rows_from_detail_pages(
 
     max_products = _positive_int_env("SCRAPEBUDDY_FEED_DETAIL_MAX_PRODUCTS", 10000)
     missing = missing[:max_products]
-    concurrency = _positive_int_env("SCRAPEBUDDY_FEED_CONCURRENCY", 2)
+    concurrency = _detail_concurrency()
 
     def fetch_and_enrich(row: dict) -> bool:
         from .detail import _extract_from_detail_page
@@ -152,7 +167,7 @@ def _enrich_rows_from_detail_pages(
         if not product_url:
             return False
         before_upc = row.get("upc") or ""
-        page_html = _fetch_detail_text(session, product_url)
+        page_html = _fetch_detail_text(_clone_session(session), product_url)
         detail = _extract_from_detail_page(page_html, product_url)
         changed = False
         for key in (
@@ -277,6 +292,28 @@ def _session_from_state_file(state_file: str | None, url: str) -> requests.Sessi
     return session
 
 
+def _clone_session(session: requests.Session) -> requests.Session:
+    cloned = requests.Session()
+    cloned.headers.update(session.headers)
+    cloned.cookies.update(session.cookies)
+    return cloned
+
+
+def _looks_blocked_response(text: str) -> bool:
+    lower = (text or "").lower()
+    return any(
+        phrase in lower
+        for phrase in (
+            "verifying your connection",
+            "checking your browser",
+            "captcha",
+            "access denied",
+            "are you a robot",
+            "too many requests",
+        )
+    )
+
+
 def _fetch_text(session: requests.Session, url: str, timeout: int = 20) -> str:
     response = session.get(url, timeout=timeout)
     response.raise_for_status()
@@ -288,7 +325,13 @@ def _fetch_detail_text(session: requests.Session, url: str, attempts: int = 3) -
     for attempt in range(1, attempts + 1):
         try:
             _sleep_before_detail_request()
-            return _fetch_text(session, url, timeout=30)
+            text = _fetch_text(session, url, timeout=30)
+            if _looks_blocked_response(text):
+                raise BlockedResponse(f"Supplier returned a bot-check page for {url}")
+            return text
+        except BlockedResponse as e:
+            last_error = e
+            time.sleep(2.5 * attempt)
         except Exception as e:
             last_error = e
             time.sleep(0.5 * attempt)
@@ -421,7 +464,7 @@ def _enrich_missing_shopify_barcodes(
 
     max_products = _positive_int_env("SCRAPEBUDDY_FEED_DETAIL_MAX_PRODUCTS", 10000)
     missing = missing[:max_products]
-    concurrency = _positive_int_env("SCRAPEBUDDY_FEED_CONCURRENCY", 2)
+    concurrency = _detail_concurrency()
     checked = 0
 
     def fetch_and_enrich(product: dict) -> bool:
@@ -430,7 +473,7 @@ def _enrich_missing_shopify_barcodes(
             return False
         product_url = urljoin(root, f"/products/{handle}")
         before = sum(1 for variant in product.get("variants") or [] if _normalize_barcode(variant.get("barcode")))
-        page_html = _fetch_detail_text(session, product_url)
+        page_html = _fetch_detail_text(_clone_session(session), product_url)
         _enrich_shopify_product_from_html(product, page_html)
         after = sum(1 for variant in product.get("variants") or [] if _normalize_barcode(variant.get("barcode")))
         return after > before

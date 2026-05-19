@@ -98,6 +98,11 @@ class FeedExporterTests(unittest.TestCase):
         self.assertEqual(rows[0]["source_product_id"], "300")
         self.assertEqual(rows[0]["source_platform"], "Product feed")
 
+    def test_blocked_detail_response_detection(self):
+        self.assertTrue(feed_exporter._looks_blocked_response("<title>Verifying your connection...</title>"))
+        self.assertTrue(feed_exporter._looks_blocked_response("Please complete the captcha"))
+        self.assertFalse(feed_exporter._looks_blocked_response("<h1>Regular product page</h1>"))
+
 
 if __name__ == "__main__":
     unittest.main()
