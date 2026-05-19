@@ -22,8 +22,11 @@ import io
 import os
 import logging
 import threading
+import math
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -399,31 +402,457 @@ def _merge_detail_fields_from_openai(product: dict, detail: dict) -> bool:
     return changed
 
 
+def _tokenize_match_text(value: str) -> set[str]:
+    return {token.lower() for token in re.findall(r"[a-z0-9]+", value or "") if len(token) >= 3}
+
+
+def _same_sku(left: str, right: str) -> bool:
+    left_norm = re.sub(r"[^a-z0-9]", "", left or "", flags=re.I).lower()
+    right_norm = re.sub(r"[^a-z0-9]", "", right or "", flags=re.I).lower()
+    return bool(left_norm and right_norm and (left_norm == right_norm or left_norm in right_norm or right_norm in left_norm))
+
+
+def _detail_product_score(listing_product: dict, detail_product: dict) -> int:
+    score = 0
+    if _same_sku(listing_product.get("sku", ""), detail_product.get("sku", "")):
+        score += 80
+    if listing_product.get("product_url") and detail_product.get("product_url"):
+        if listing_product["product_url"].rstrip("/") == detail_product["product_url"].rstrip("/"):
+            score += 60
+    listing_tokens = _tokenize_match_text(listing_product.get("product_name", ""))
+    detail_tokens = _tokenize_match_text(detail_product.get("product_name", ""))
+    if listing_tokens and detail_tokens:
+        score += min(30, len(listing_tokens & detail_tokens) * 5)
+    if detail_product.get("upc") or detail_product.get("ean") or detail_product.get("gtin"):
+        score += 10
+    return score
+
+
+def _choose_best_detail_product(listing_product: dict, detail_products: list[dict]) -> dict | None:
+    if not detail_products:
+        return None
+    scored = sorted(
+        detail_products,
+        key=lambda item: _detail_product_score(listing_product, item),
+        reverse=True,
+    )
+    best = scored[0]
+    return best if _detail_product_score(listing_product, best) > 0 else detail_products[0]
+
+
+def _is_barcode_candidate(value: str) -> bool:
+    digits = re.sub(r"\D", "", value or "")
+    if len(digits) not in {8, 12, 13, 14}:
+        return False
+    if len(set(digits)) <= 2:
+        return False
+    body = [int(char) for char in digits[:-1]]
+    check_digit = int(digits[-1])
+    total = 0
+    for index, digit in enumerate(reversed(body), start=1):
+        total += digit * (3 if index % 2 else 1)
+    return (10 - (total % 10)) % 10 == check_digit
+
+
+def _first_identifier_from_values(*values: str) -> str:
+    for value in values:
+        for match in re.findall(r"\b\d[\d\s-]{6,20}\d\b", str(value or "")):
+            digits = re.sub(r"\D", "", match)
+            if _is_barcode_candidate(digits):
+                return digits
+    return ""
+
+
+def _identifier_evidence_from_detail_html(html: str) -> dict:
+    soup = BeautifulSoup(html or "", "html.parser")
+    evidence: dict[str, str] = {}
+
+    for script in soup.find_all("script", attrs={"type": re.compile(r"ld\+json", re.I)}):
+        text = script.string or script.get_text(" ", strip=True)
+        if not text:
+            continue
+        for key in ("gtin14", "gtin13", "gtin12", "gtin8", "gtin", "upc", "ean", "barcode"):
+            match = re.search(rf'"{key}"\s*:\s*"([^"]+)"', text, re.I)
+            if match:
+                value = _first_identifier_from_values(match.group(1))
+                if value:
+                    evidence.setdefault("identifier", value)
+                    evidence.setdefault("identifier_type", key.lower())
+                    evidence.setdefault("identifier_source", f"jsonld:{key}")
+                    break
+
+    for tag in soup.find_all("meta"):
+        name = tag.get("name") or tag.get("property") or tag.get("itemprop") or ""
+        content = tag.get("content") or ""
+        if re.search(r"gtin|upc|ean|barcode", name, re.I):
+            value = _first_identifier_from_values(content)
+            if value:
+                evidence.setdefault("identifier", value)
+                evidence.setdefault("identifier_type", name.lower())
+                evidence.setdefault("identifier_source", f"meta:{name}")
+                break
+
+    for tag in soup.find_all(string=re.compile(r"UPC|GTIN|EAN|Barcode", re.I)):
+        text = str(tag)
+        if hasattr(tag, "parents"):
+            for parent in tag.parents:
+                if getattr(parent, "name", None) not in {"li", "tr", "td", "div", "section", "span", "p"}:
+                    continue
+                candidate_text = parent.get_text(" ", strip=True)
+                if len(candidate_text) <= 500:
+                    text = candidate_text
+                    break
+            else:
+                continue
+        value = _first_identifier_from_values(text)
+        if value:
+            evidence.setdefault("identifier", value)
+            evidence.setdefault("identifier_type", "visible_label")
+            evidence.setdefault("identifier_source", "visible_label")
+            break
+
+    if not evidence.get("identifier"):
+        for script in soup.find_all("script"):
+            text = script.string or script.get_text(" ", strip=True)
+            if not text or not re.search(r"gtin|upc|ean|barcode", text, re.I):
+                continue
+            for match in re.finditer(
+                r"(?:gtin(?:8|12|13|14)?|upc|ean|barcode)[\w-]*[\"']?\s*[:=]\s*[\"']([^\"']+)[\"']",
+                text,
+                re.I,
+            ):
+                value = _first_identifier_from_values(match.group(1))
+                if value:
+                    evidence.setdefault("identifier", value)
+                    evidence.setdefault("identifier_type", match.group(0).split(":", 1)[0].lower())
+                    evidence.setdefault("identifier_source", "script_identifier_field")
+                    break
+            if evidence.get("identifier"):
+                break
+
+    return evidence
+
+
+def _assign_identifier_from_evidence(product: dict, evidence: dict) -> bool:
+    value = evidence.get("identifier")
+    if not value or product.get("upc") or product.get("ean") or product.get("gtin"):
+        return False
+
+    source_type = str(evidence.get("identifier_type") or "").lower()
+    digits = re.sub(r"\D", "", value)
+    if "ean" in source_type or len(digits) == 13:
+        target = "ean"
+    elif "gtin" in source_type or len(digits) == 14:
+        target = "gtin"
+    else:
+        target = "upc"
+
+    product[target] = value
+    product["barcode_raw"] = value
+    product["identifier_type"] = target
+    product["upc_source"] = evidence.get("identifier_source", "supplier_page")
+    return True
+
+
+def _openai_page_limit() -> int:
+    try:
+        return max(1, int(os.environ.get("SCRAPEBUDDY_OPENAI_PAGE_LIMIT", "100") or "100"))
+    except Exception:
+        return 100
+
+
+def _openai_detail_limit() -> int:
+    try:
+        return max(0, int(os.environ.get("SCRAPEBUDDY_OPENAI_DETAIL_LIMIT", "1000") or "1000"))
+    except Exception:
+        return 1000
+
+
+def _openai_detail_concurrency() -> int:
+    try:
+        return min(12, max(1, int(os.environ.get("SCRAPEBUDDY_OPENAI_DETAIL_CONCURRENCY", "8") or "8")))
+    except Exception:
+        return 8
+
+
+def _openai_detail_llm_enabled() -> bool:
+    return os.environ.get("SCRAPEBUDDY_OPENAI_DETAIL_LLM", "0").strip().lower() in {
+        "1", "true", "yes", "on", "always"
+    }
+
+
+def _detect_openai_pagination(html: str) -> dict:
+    soup = BeautifulSoup(html or "", "html.parser")
+    text = soup.get_text(" ", strip=True)
+    total_products = None
+    total_pages = None
+
+    for pattern in (
+        r"\b\d+\s*-\s*\d+\s+of\s+([\d,]+)\b",
+        r"\b([\d,]+)\s+(?:items?|products?|results?)\b",
+    ):
+        match = re.search(pattern, text, re.I)
+        if match:
+            try:
+                total_products = int(match.group(1).replace(",", ""))
+                break
+            except Exception:
+                pass
+
+    page_numbers = []
+    for candidate in soup.find_all(["a", "button"]):
+        value = candidate.get_text(" ", strip=True)
+        if re.fullmatch(r"\d{1,4}", value or ""):
+            try:
+                page_numbers.append(int(value))
+            except Exception:
+                pass
+    if len(page_numbers) >= 2:
+        total_pages = max(page_numbers)
+
+    return {"total_products": total_products, "total_pages": total_pages}
+
+
+def _next_page_candidates(current_url: str, next_page: int) -> list[str]:
+    parsed = urlparse(current_url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    candidates = []
+    for name in ("page", "p", "pg", "pageNumber", "Page", "currentPage"):
+        next_params = dict(params)
+        next_params[name] = [str(next_page)]
+        candidates.append(parsed._replace(query=urlencode(next_params, doseq=True)).geturl())
+
+    path = parsed.path or ""
+    for pattern, repl in (
+        (r"(/page/)\d+(/?)$", rf"\g<1>{next_page}\g<2>"),
+        (r"(/p/)\d+(/?)$", rf"\g<1>{next_page}\g<2>"),
+    ):
+        next_path = re.sub(pattern, repl, path, flags=re.I)
+        if next_path != path:
+            candidates.append(parsed._replace(path=next_path).geturl())
+
+    seen = set()
+    unique = []
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.add(candidate)
+            unique.append(candidate)
+    return unique
+
+
+def _find_next_link(html: str, current_url: str, visited: set[str]) -> str | None:
+    soup = BeautifulSoup(html or "", "html.parser")
+    base_host = urlparse(current_url).netloc
+    for link in soup.find_all("a", href=True):
+        text = link.get_text(" ", strip=True).lower()
+        rel = " ".join(link.get("rel") or []).lower()
+        aria = str(link.get("aria-label") or "").lower()
+        if not (rel == "next" or text in {"next", "next >", ">", "›", "»"} or "next" in aria):
+            continue
+        candidate = urljoin(current_url, link["href"])
+        if urlparse(candidate).netloc != base_host or candidate in visited:
+            continue
+        return candidate
+    return None
+
+
+def _extract_openai_listing_products(html: str, url: str) -> list[dict]:
+    return llm_extractor.extract_from_text(_compact_listing_evidence(html, url), url, content_type="listing_evidence")
+
+
+def _collect_openai_listing_pages(start_html: str, start_url: str, state_file: str | None = None) -> tuple[list[dict], dict]:
+    visited = {start_url}
+    current_url = start_url
+    current_html = start_html
+    products = []
+    page_limit = _openai_page_limit()
+    detected = _detect_openai_pagination(start_html)
+    estimated_total_pages = detected.get("total_pages")
+    pages_visited = 0
+
+    while pages_visited < page_limit:
+        pages_visited += 1
+        logging.info(f"[OpenAIOnly] Listing page {pages_visited}: {current_url}")
+        page_products = _extract_openai_listing_products(current_html, current_url)
+        products.extend(page_products)
+
+        if not estimated_total_pages and detected.get("total_products") and page_products:
+            estimated_total_pages = math.ceil(detected["total_products"] / len(page_products))
+
+        next_url = _find_next_link(current_html, current_url, visited)
+        if not next_url and estimated_total_pages and pages_visited < estimated_total_pages:
+            for candidate in _next_page_candidates(current_url, pages_visited + 1):
+                if candidate not in visited:
+                    next_url = candidate
+                    break
+
+        if not next_url:
+            break
+
+        visited.add(next_url)
+        try:
+            current_html, _ = _fetch_html_for_openai(next_url, state_file=state_file)
+            current_url = next_url
+        except Exception as e:
+            logging.warning(f"[OpenAIOnly] Could not fetch listing page {next_url}: {e}")
+            break
+
+    products, removed = dedup_products(products)
+    return products, {
+        "pages_visited": pages_visited,
+        "expected_pages": estimated_total_pages,
+        "expected_products": detected.get("total_products"),
+        "duplicates_removed": removed,
+    }
+
+
+def _compact_listing_evidence(html: str, url: str) -> str:
+    soup = BeautifulSoup(html or "", "html.parser")
+    for tag_name in ("script", "style", "svg", "iframe", "noscript"):
+        for tag in soup.find_all(tag_name):
+            tag.decompose()
+
+    chunks = []
+    title = soup.find("title")
+    if title:
+        chunks.append(f"PAGE TITLE: {title.get_text(' ', strip=True)}")
+
+    for selector in (
+        "[class*='product']", "[class*='item']", "[class*='card']",
+        "[class*='sku']", "[class*='price']", "table", "main",
+    ):
+        for tag in soup.select(selector)[:160]:
+            text = tag.get_text(" ", strip=True)
+            if len(text) < 20:
+                continue
+            links = []
+            for a in tag.find_all("a", href=True)[:4]:
+                href = urljoin(url, a["href"])
+                label = a.get_text(" ", strip=True)
+                links.append(f"{label} -> {href}".strip())
+            chunk = text[:1800]
+            if links:
+                chunk += "\nLinks: " + " | ".join(links)
+            chunks.append(chunk)
+            if len("\n\n".join(chunks)) > 180_000:
+                return "\n\n---\n\n".join(chunks)
+
+    if len(chunks) < 4:
+        chunks.append(soup.get_text("\n", strip=True)[:180_000])
+    return "\n\n---\n\n".join(chunks)
+
+
+def _compact_detail_evidence(html: str, url: str, product: dict) -> str:
+    soup = BeautifulSoup(html or "", "html.parser")
+    identifier_evidence = _identifier_evidence_from_detail_html(html)
+    chunks = [
+        "TASK: Extract only the product matching the known listing SKU/name below. Ignore related, recommended, sponsored, and recently viewed products.",
+        f"DETAIL URL: {url}",
+        f"KNOWN LISTING PRODUCT: {product.get('product_name', '')}",
+        f"KNOWN SKU: {product.get('sku', '')}",
+        f"KNOWN PRICE: {product.get('price', '')}",
+    ]
+    if identifier_evidence.get("identifier"):
+        chunks.append(
+            f"BARCODE EVIDENCE ({identifier_evidence.get('identifier_source', 'page')}): "
+            f"{identifier_evidence['identifier']}"
+        )
+
+    for tag in soup.find_all(["title", "h1", "h2"]):
+        text = tag.get_text(" ", strip=True)
+        if text:
+            chunks.append(text)
+
+    for tag in soup.find_all("meta"):
+        name = tag.get("name") or tag.get("property") or tag.get("itemprop")
+        content = tag.get("content")
+        if name and content and re.search(r"title|description|sku|upc|gtin|ean|barcode|image|price", name, re.I):
+            chunks.append(f"META {name}: {content}")
+
+    for script in soup.find_all("script"):
+        text = script.string or script.get_text(" ", strip=True)
+        if not text:
+            continue
+        if re.search(r"upc|gtin|ean|barcode|sku|productid|product_id|mfr|manufacturer", text, re.I):
+            for match in re.finditer(r".{0,700}(?:upc|gtin|ean|barcode|sku|productid|product_id|mfr|manufacturer).{0,1200}", text, re.I | re.S):
+                chunks.append("SCRIPT: " + re.sub(r"\s+", " ", match.group(0)).strip())
+                if len("\n\n".join(chunks)) > 180_000:
+                    return "\n\n---\n\n".join(chunks)
+
+    for tag in soup.find_all(string=re.compile(r"UPC|GTIN|EAN|Barcode|SKU|Manufacturer|Item #", re.I)):
+        parent = tag.find_parent(["li", "tr", "div", "section", "span"]) if hasattr(tag, "find_parent") else None
+        text = parent.get_text(" ", strip=True) if parent else str(tag)
+        if text:
+            chunks.append(text[:2000])
+
+    return "\n\n---\n\n".join(chunks)[:200_000]
+
+
 def _openai_enrich_detail_pages(products: list[dict], state_file: str | None = None) -> int:
     if not llm_extractor.enabled():
         return 0
 
-    max_details = int(os.environ.get("SCRAPEBUDDY_OPENAI_DETAIL_LIMIT", "80") or "80")
+    max_details = _openai_detail_limit()
     candidates = [
         product for product in products
         if product.get("product_url")
         and not (product.get("upc") or product.get("ean") or product.get("gtin"))
     ][:max_details]
     enriched = 0
-    for index, product in enumerate(candidates, start=1):
+
+    def enrich_one(index: int, product: dict) -> bool:
         url = product.get("product_url")
         try:
             logging.info(f"[OpenAIOnly] Detail extraction [{index}/{len(candidates)}] {url}")
-            html, content_type = _fetch_html_for_openai(url, state_file=state_file)
-            detail_products = llm_extractor.extract_from_text(
-                html,
-                url,
-                content_type=f"detail_{content_type}",
+            content_type = "html"
+            if state_file:
+                html, content_type = _fetch_html_for_openai(url, state_file=state_file)
+            else:
+                try:
+                    html = fetch_html(url)
+                except Exception:
+                    html = ""
+            identifier_evidence = _identifier_evidence_from_detail_html(html)
+
+            if not identifier_evidence.get("identifier") and (state_file or _html_needs_browser_crawler(html)):
+                html, content_type = _fetch_html_for_openai(url, state_file=state_file)
+                identifier_evidence = _identifier_evidence_from_detail_html(html)
+
+            changed = False
+            changed = _assign_identifier_from_evidence(product, identifier_evidence)
+
+            needs_core_fields = not (
+                product.get("product_name")
+                and product.get("sku")
+                and product.get("price")
             )
-            if detail_products and _merge_detail_fields_from_openai(product, detail_products[0]):
-                enriched += 1
+            if _openai_detail_llm_enabled() or (not changed and needs_core_fields):
+                evidence = _compact_detail_evidence(html, url, product)
+                detail_products = llm_extractor.extract_from_text(
+                    evidence,
+                    url,
+                    content_type=f"detail_evidence_{content_type}",
+                )
+                best_detail = _choose_best_detail_product(product, detail_products)
+                if best_detail:
+                    changed = _merge_detail_fields_from_openai(product, best_detail) or changed
+            return changed
         except Exception as e:
             logging.warning(f"[OpenAIOnly] Detail extraction failed for {url}: {e}")
+            return False
+
+    if not candidates:
+        return 0
+
+    workers = min(_openai_detail_concurrency(), len(candidates))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [
+            executor.submit(enrich_one, index, product)
+            for index, product in enumerate(candidates, start=1)
+        ]
+        for future in as_completed(futures):
+            if future.result():
+                enriched += 1
     return enriched
 
 
@@ -435,7 +864,7 @@ def _run_openai_only_scrape(url: str, html: str = "", state_file: str | None = N
     if not html or state_file or _html_needs_browser_crawler(html):
         html, content_type = _fetch_html_for_openai(url, state_file=state_file)
 
-    products = llm_extractor.extract_from_text(html, url, content_type=content_type)
+    products, crawl_diagnostics = _collect_openai_listing_pages(html, url, state_file=state_file)
 
     if products:
         detail_wins = _openai_enrich_detail_pages(products, state_file=state_file)
@@ -453,6 +882,7 @@ def _run_openai_only_scrape(url: str, html: str = "", state_file: str | None = N
             "openai_only": True,
             "content_type": content_type,
             "openai_detail_pages_enriched": detail_wins,
+            **crawl_diagnostics,
             "stop_reason": "OpenAI-only extraction completed",
         },
     }
