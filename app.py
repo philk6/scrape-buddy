@@ -39,10 +39,10 @@ from bs4 import BeautifulSoup
 import database
 import browser_login
 import upc_enrichment
-from scraper import fetch_html, debug_scrape, make_auth_fetch_fn
+from scraper import fetch_html, fetch_html_playwright, debug_scrape, make_auth_fetch_fn
 from strategies import run_best_strategy
 from strategies.detail import run as detail_run
-from strategies import playwright_catalog, firecrawl_fallback, feed_exporter
+from strategies import playwright_catalog, firecrawl_fallback, feed_exporter, llm_extractor
 from strategies.pagination import dedup_products
 from strategies.product_quality import build_error_report, build_quality_report, normalize_products
 from upc_providers import default_providers
@@ -298,6 +298,12 @@ def _auth_firecrawl_mode() -> str:
     return os.environ.get("SCRAPEBUDDY_FIRECRAWL_AUTH_MODE", "disabled").strip().lower()
 
 
+def _openai_only_mode() -> bool:
+    return os.environ.get("SCRAPEBUDDY_OPENAI_ONLY", "1").strip().lower() not in {
+        "0", "off", "false", "disabled", "no",
+    }
+
+
 def _merge_products(primary: list[dict], supplemental: list[dict]) -> list[dict]:
     merged, _removed = dedup_products((primary or []) + (supplemental or []))
     return merged
@@ -335,16 +341,137 @@ def _mark_external_upc_skipped(products: list[dict], reason: str) -> None:
         product.setdefault("resolution_reason", reason)
 
 
+def _render_html_for_openai(url: str, state_file: str | None = None, wait_ms: int = 8000) -> str:
+    if not state_file:
+        return fetch_html_playwright(url, wait_ms=wait_ms, strict=True)
+
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            storage_state=state_file,
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1920, "height": 1080},
+        )
+        page = context.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+        page.wait_for_timeout(wait_ms)
+        html = page.content()
+        browser.close()
+        return html
+
+
+def _fetch_html_for_openai(url: str, state_file: str | None = None) -> tuple[str, str]:
+    if state_file:
+        return _render_html_for_openai(url, state_file=state_file), "authenticated_rendered_html"
+
+    try:
+        html = fetch_html(url)
+    except Exception:
+        html = ""
+
+    if _html_needs_browser_crawler(html):
+        try:
+            rendered = _render_html_for_openai(url)
+            if len(rendered or "") > len(html or ""):
+                return rendered, "rendered_html"
+        except Exception as e:
+            logging.warning(f"[OpenAIOnly] Browser render failed for {url}: {e}")
+
+    return html, "html"
+
+
+def _merge_detail_fields_from_openai(product: dict, detail: dict) -> bool:
+    changed = False
+    for key in (
+        "product_name", "brand", "sku", "upc", "ean", "gtin", "price",
+        "pack_size", "case_pack", "image_url", "product_url",
+    ):
+        value = detail.get(key)
+        if value and (not product.get(key) or key in {"upc", "ean", "gtin"}):
+            product[key] = value
+            changed = True
+    return changed
+
+
+def _openai_enrich_detail_pages(products: list[dict], state_file: str | None = None) -> int:
+    if not llm_extractor.enabled():
+        return 0
+
+    max_details = int(os.environ.get("SCRAPEBUDDY_OPENAI_DETAIL_LIMIT", "80") or "80")
+    candidates = [
+        product for product in products
+        if product.get("product_url")
+        and not (product.get("upc") or product.get("ean") or product.get("gtin"))
+    ][:max_details]
+    enriched = 0
+    for index, product in enumerate(candidates, start=1):
+        url = product.get("product_url")
+        try:
+            logging.info(f"[OpenAIOnly] Detail extraction [{index}/{len(candidates)}] {url}")
+            html, content_type = _fetch_html_for_openai(url, state_file=state_file)
+            detail_products = llm_extractor.extract_from_text(
+                html,
+                url,
+                content_type=f"detail_{content_type}",
+            )
+            if detail_products and _merge_detail_fields_from_openai(product, detail_products[0]):
+                enriched += 1
+        except Exception as e:
+            logging.warning(f"[OpenAIOnly] Detail extraction failed for {url}: {e}")
+    return enriched
+
+
+def _run_openai_only_scrape(url: str, html: str = "", state_file: str | None = None) -> dict | None:
+    if not llm_extractor.enabled():
+        raise RuntimeError("OPENAI_API_KEY is not set, so OpenAI-only extraction cannot run.")
+
+    content_type = "html"
+    if not html or state_file or _html_needs_browser_crawler(html):
+        html, content_type = _fetch_html_for_openai(url, state_file=state_file)
+
+    products = llm_extractor.extract_from_text(html, url, content_type=content_type)
+
+    if products:
+        detail_wins = _openai_enrich_detail_pages(products, state_file=state_file)
+    else:
+        detail_wins = 0
+
+    products = normalize_products(products)
+    return {
+        "strategy_id": 70,
+        "strategy_name": "OpenAI Product Extraction",
+        "reason": "OpenAI extracted product rows from page content and detail pages",
+        "products": products,
+        "_skip_external_upc_enrichment": True,
+        "_crawl_diagnostics": {
+            "openai_only": True,
+            "content_type": content_type,
+            "openai_detail_pages_enriched": detail_wins,
+            "stop_reason": "OpenAI-only extraction completed",
+        },
+    }
+
+
 def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = False) -> None:
     """
     Run scraping strategies + enrichment in a background thread.
     Calls database.complete_run() on success or database.fail_run() on error.
     """
     try:
-        result = feed_exporter.run(url)
+        if _openai_only_mode():
+            logging.info(f"[Job {run_id}] OpenAI-only extraction enabled")
+            result = _run_openai_only_scrape(url, html=html)
+        else:
+            result = feed_exporter.run(url)
         if result:
             logging.info(
-                f"[Job {run_id}] Feed-first export found "
+                f"[Job {run_id}] {result.get('strategy_name', 'Extraction')} found "
                 f"{len(result.get('products', []))} row(s)"
             )
             feed_diag = (result.get("diagnostics") or {}).get("feed")
@@ -636,18 +763,25 @@ def _run_auth_scrape_worker(
         auth_firecrawl_mode = _auth_firecrawl_mode()
         firecrawl_first = auth_firecrawl_mode in {"first", "primary", "always", "firecrawl_first"}
 
-        feed_result = feed_exporter.run(url, state_file=state_file)
+        if _openai_only_mode():
+            feed_result = _run_openai_only_scrape(url, state_file=state_file)
+        else:
+            feed_result = feed_exporter.run(url, state_file=state_file)
         if feed_result:
             products = feed_result.get("products", [])
             strategy_id = feed_result.get("strategy_id", feed_exporter.ID)
             strategy_name = feed_result.get("strategy_name", feed_exporter.NAME)
-            crawl_diagnostics = feed_result.get("diagnostics", {}).get("feed", {})
+            crawl_diagnostics = (
+                feed_result.get("_crawl_diagnostics")
+                or feed_result.get("diagnostics", {}).get("feed", {})
+                or {}
+            )
             logging.info(
-                f"[Job {run_id}] Auth feed-first export found "
+                f"[Job {run_id}] Auth {strategy_name} found "
                 f"{len(products)} row(s)"
             )
 
-        if not products and firecrawl_first and firecrawl_fallback.enabled():
+        if not products and not _openai_only_mode() and firecrawl_first and firecrawl_fallback.enabled():
             try:
                 products = firecrawl_fallback.run_authenticated(url, state_file)
                 if products:
@@ -664,12 +798,13 @@ def _run_auth_scrape_worker(
             except Exception as e:
                 logging.warning(f"[Job {run_id}] Firecrawl authenticated scrape failed: {e}")
 
-        if not products:
+        if not products and not _openai_only_mode():
             products = playwright_catalog.run(state_file, url)
             crawl_diagnostics = getattr(playwright_catalog, "LAST_CRAWL_DIAGNOSTICS", {}) or {}
 
         should_try_auth_firecrawl = (
             firecrawl_fallback.enabled()
+            and not _openai_only_mode()
             and not firecrawl_first
             and auth_firecrawl_mode not in {"0", "off", "disabled", "none", "never"}
             and (not products or auth_firecrawl_mode in {"supplement", "always"})
