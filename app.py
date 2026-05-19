@@ -291,11 +291,11 @@ def _run_public_browser_catalog(url: str) -> tuple[dict | None, dict]:
 
 
 def _firecrawl_mode() -> str:
-    return os.environ.get("SCRAPEBUDDY_FIRECRAWL_MODE", "fallback").strip().lower()
+    return os.environ.get("SCRAPEBUDDY_FIRECRAWL_MODE", "disabled").strip().lower()
 
 
 def _auth_firecrawl_mode() -> str:
-    return os.environ.get("SCRAPEBUDDY_FIRECRAWL_AUTH_MODE", "fallback").strip().lower()
+    return os.environ.get("SCRAPEBUDDY_FIRECRAWL_AUTH_MODE", "disabled").strip().lower()
 
 
 def _merge_products(primary: list[dict], supplemental: list[dict]) -> list[dict]:
@@ -481,7 +481,10 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
 
         if result is None:
             if use_playwright and _html_needs_browser_crawler(html):
-                if firecrawl_fallback.enabled():
+                if (
+                    firecrawl_fallback.enabled()
+                    and firecrawl_mode not in {"0", "off", "disabled", "none", "never"}
+                ):
                     try:
                         firecrawl_products = firecrawl_fallback.run(url)
                         if firecrawl_products:

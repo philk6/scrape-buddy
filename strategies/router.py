@@ -68,6 +68,9 @@ def _finalize_result_dict(result: dict) -> dict:
 
 
 def _try_firecrawl_fallback(url: str, reason_prefix: str = "") -> dict | None:
+    if _firecrawl_mode() in {"0", "off", "disabled", "none", "never"}:
+        logger.info("[Router] Firecrawl fallback disabled")
+        return None
     if not firecrawl_fallback.enabled():
         logger.info("[Router] Firecrawl fallback disabled or FIRECRAWL_API_KEY not set")
         return None
@@ -88,7 +91,7 @@ def _try_firecrawl_fallback(url: str, reason_prefix: str = "") -> dict | None:
 
 
 def _firecrawl_mode() -> str:
-    return os.environ.get("SCRAPEBUDDY_FIRECRAWL_MODE", "fallback").strip().lower()
+    return os.environ.get("SCRAPEBUDDY_FIRECRAWL_MODE", "disabled").strip().lower()
 
 
 def _should_try_firecrawl_first() -> bool:
