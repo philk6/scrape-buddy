@@ -138,7 +138,7 @@ _UNIT_SIZE_LABELS = [
 ]
 
 _ITEM_NO_LABELS = [
-    "item no", "item number", "item #", "item#", "item code",
+    "item no", "item-no", "item number", "item #", "item#", "item code",
     "sku", "part number", "part #", "part no", "model number", "model #",
     "product code", "product number", "catalog number", "catalog #",
     "vendor part #", "vendor item #",
@@ -1318,15 +1318,15 @@ def _extract_from_detail_page(html: str, url: str) -> dict:
             )
 
         if not sku:
+            sku = _find_label_value(soup, _ITEM_NO_LABELS)
+
+        if not sku:
             for attr in ["data-sku", "data-product-id", "data-variant-id", "data-item-id"]:
                 el = soup.find(attrs={attr: True})
                 if el is not None:
                     sku = str(el.get(attr) or "").strip()
                     if sku:
                         break
-
-        if not sku:
-            sku = _find_label_value(soup, _ITEM_NO_LABELS)
 
         sku = sku.strip()
         if not _looks_like_valid_detail_sku(sku):

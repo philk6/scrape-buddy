@@ -44,8 +44,11 @@ import logging
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlparse, urlunparse
+
+import requests
 
 from scraper import HEADERS, _DYNAMIC_EXPANSION_SELECTORS, _expand_dynamic_catalog, extract_products
 from strategies.detail import (
@@ -89,6 +92,10 @@ DETAIL_PAGE_LIMIT = _positive_int_env(
 AUTH_DETAIL_ENRICH_LIMIT = _positive_int_env(
     "SCRAPEBUDDY_BROWSER_DETAIL_ENRICH_LIMIT",
     _positive_int_env("SCRAPEBUDDY_AUTH_DETAIL_ENRICH_LIMIT", DETAIL_PAGE_LIMIT),
+)
+PUBLIC_DETAIL_CONCURRENCY = min(
+    16,
+    _positive_int_env("SCRAPEBUDDY_PUBLIC_DETAIL_CONCURRENCY", 8),
 )
 
 GENERIC_ERROR_TITLES = {"oops.", "404", "page not found", "not found", "access denied"}
@@ -1859,6 +1866,50 @@ def _merge_listing_and_detail(listing: dict, detail: dict) -> dict:
     return merged
 
 
+def _enrich_public_detail_pages(enrich_links: list[str], listing_by_url: dict[str, dict]) -> list[dict]:
+    """
+    Fast detail-page enrichment for public catalogs.
+
+    Listing pages often omit UPC/GTIN/EAN. Public detail pages can usually be
+    fetched directly without a browser, so use concurrent HTTP before falling
+    back to slower browser/session detail navigation elsewhere.
+    """
+    enriched_by_url: dict[str, dict] = {}
+
+    def fetch_one(link: str) -> tuple[str, dict]:
+        listing_row = listing_by_url.get(link, {})
+        try:
+            response = requests.get(link, headers=HEADERS, timeout=20)
+            response.raise_for_status()
+            detail_product = _extract_from_detail_page(response.text, link)
+            is_valid, reason = _is_valid_detail_product(detail_product)
+            if not is_valid:
+                logger.warning(
+                    f"[Strategy 3] Public detail enrich rejected ({link}): {reason}. "
+                    "Preserving listing row fallback."
+                )
+                return link, listing_row
+            return link, _merge_listing_and_detail(listing_row, detail_product)
+        except Exception as e:
+            logger.warning(f"[Strategy 3] Public detail enrich failed ({link}): {e}")
+            return link, listing_row
+
+    workers = max(1, min(PUBLIC_DETAIL_CONCURRENCY, len(enrich_links)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(fetch_one, link): link for link in enrich_links}
+        for index, future in enumerate(as_completed(futures), start=1):
+            link, product = future.result()
+            if product and (product.get("product_name") or product.get("product_url")):
+                enriched_by_url[link] = product
+            if index % 50 == 0 or index == len(enrich_links):
+                logger.info(
+                    f"[Strategy 3] Public detail enrich progress: "
+                    f"{index}/{len(enrich_links)} detail page(s)"
+                )
+
+    return [enriched_by_url[link] for link in enrich_links if link in enriched_by_url]
+
+
 def _select_detail_enrichment_links(
     all_product_links: list[str],
     valid_listing_urls: set[str],
@@ -2424,34 +2475,41 @@ def _run_inner(page, listing_url: str) -> list:
             enrich_links = enrich_links[:AUTH_DETAIL_ENRICH_LIMIT]
 
         if enrich_links:
-            enriched = []
-            for i, link in enumerate(enrich_links, 1):
-                listing_row = listing_by_url.get(link, {})
-                try:
-                    logger.info(f"[Strategy 3] Detail enrich [{i}/{len(enrich_links)}] {link}")
-                    page.goto(link, wait_until="domcontentloaded", timeout=25_000)
-                    _wait_for_render(page)
-                    detail_html = page.content()
-                    detail_product = _extract_from_detail_page(detail_html, link)
-                    is_valid, reason = _is_valid_detail_product(detail_product)
-                    if not is_valid:
-                        logger.warning(
-                            f"[Strategy 3] Detail enrich rejected ({link}): {reason}. "
-                            f"Preserving listing row fallback."
-                        )
+            if storage_state is None:
+                logger.info(
+                    f"[Strategy 3] Public detail enrichment using "
+                    f"{PUBLIC_DETAIL_CONCURRENCY} concurrent HTTP worker(s)"
+                )
+                enriched = _enrich_public_detail_pages(enrich_links, listing_by_url)
+            else:
+                enriched = []
+                for i, link in enumerate(enrich_links, 1):
+                    listing_row = listing_by_url.get(link, {})
+                    try:
+                        logger.info(f"[Strategy 3] Detail enrich [{i}/{len(enrich_links)}] {link}")
+                        page.goto(link, wait_until="domcontentloaded", timeout=25_000)
+                        _wait_for_render(page)
+                        detail_html = page.content()
+                        detail_product = _extract_from_detail_page(detail_html, link)
+                        is_valid, reason = _is_valid_detail_product(detail_product)
+                        if not is_valid:
+                            logger.warning(
+                                f"[Strategy 3] Detail enrich rejected ({link}): {reason}. "
+                                f"Preserving listing row fallback."
+                            )
+                            if listing_row:
+                                enriched.append(listing_row)
+                            continue
+
+                        merged = _merge_listing_and_detail(listing_row, detail_product)
+                        if merged.get("product_name") or merged.get("product_url"):
+                            enriched.append(merged)
+                        elif listing_row:
+                            enriched.append(listing_row)
+                    except Exception as e:
+                        logger.warning(f"[Strategy 3] Detail enrich failed ({link}): {e}")
                         if listing_row:
                             enriched.append(listing_row)
-                        continue
-
-                    merged = _merge_listing_and_detail(listing_row, detail_product)
-                    if merged.get("product_name") or merged.get("product_url"):
-                        enriched.append(merged)
-                    elif listing_row:
-                        enriched.append(listing_row)
-                except Exception as e:
-                    logger.warning(f"[Strategy 3] Detail enrich failed ({link}): {e}")
-                    if listing_row:
-                        enriched.append(listing_row)
 
             enriched_keys = {
                 (
