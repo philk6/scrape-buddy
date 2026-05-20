@@ -344,6 +344,67 @@ def _mark_external_upc_skipped(products: list[dict], reason: str) -> None:
         product.setdefault("resolution_reason", reason)
 
 
+def _barcode_count(products: list[dict]) -> int:
+    return sum(1 for product in products or [] if product.get("upc") or product.get("ean") or product.get("gtin"))
+
+
+def _barcode_coverage(products: list[dict]) -> float:
+    return (_barcode_count(products) / len(products)) if products else 0.0
+
+
+def _should_try_browser_recovery(result: dict) -> bool:
+    products = result.get("products") or []
+    diagnostics = result.get("_crawl_diagnostics") or {}
+    expected = int(diagnostics.get("expected_products") or 0)
+    if expected and len(products) < expected * 0.9:
+        return True
+    return bool(products and _barcode_coverage(products) < 0.75)
+
+
+def _result_strength(result: dict | None) -> tuple[int, int, float]:
+    products = (result or {}).get("products") or []
+    return (len(products), _barcode_count(products), _barcode_coverage(products))
+
+
+def _maybe_recover_with_browser_catalog(result: dict, url: str) -> dict:
+    if not _should_try_browser_recovery(result):
+        return result
+
+    try:
+        browser_result, browser_diag = _run_public_browser_catalog(url)
+    except Exception as e:
+        logging.warning(f"[OpenAIOnly] Browser recovery failed: {e}")
+        return result
+
+    if not browser_result:
+        return result
+
+    openai_strength = _result_strength(result)
+    browser_strength = _result_strength(browser_result)
+    if browser_strength[0] > openai_strength[0] or browser_strength[1] > openai_strength[1]:
+        merged_products = _merge_products(browser_result.get("products", []), result.get("products", []))
+        browser_result["products"] = merged_products
+        browser_result["strategy_name"] = "OpenAI + Browser Catalog Extraction"
+        browser_result["reason"] = (
+            "OpenAI extraction was supplemented by the rendered browser/API catalog "
+            "crawler because product or identifier coverage was incomplete"
+        )
+        merged_diag = dict(browser_result.get("_crawl_diagnostics") or {})
+        merged_diag.update({
+            "openai_recovery_triggered": True,
+            "openai_rows_before_recovery": openai_strength[0],
+            "openai_barcodes_before_recovery": openai_strength[1],
+            "browser_rows_before_merge": browser_strength[0],
+            "browser_barcodes_before_merge": browser_strength[1],
+            "browser_recovery_stop_reason": browser_diag.get("stop_reason", ""),
+        })
+        browser_result["_crawl_diagnostics"] = merged_diag
+        browser_result["_skip_external_upc_enrichment"] = False
+        return browser_result
+
+    return result
+
+
 def _render_html_for_openai(url: str, state_file: str | None = None, wait_ms: int = 8000) -> str:
     if not state_file:
         return fetch_html_playwright(url, wait_ms=wait_ms, strict=True)
@@ -877,7 +938,7 @@ def _run_openai_only_scrape(url: str, html: str = "", state_file: str | None = N
         "strategy_name": "OpenAI Product Extraction",
         "reason": "OpenAI extracted product rows from page content and detail pages",
         "products": products,
-        "_skip_external_upc_enrichment": True,
+        "_skip_external_upc_enrichment": False,
         "_crawl_diagnostics": {
             "openai_only": True,
             "content_type": content_type,
@@ -897,6 +958,7 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
         if _openai_only_mode():
             logging.info(f"[Job {run_id}] OpenAI-only extraction enabled")
             result = _run_openai_only_scrape(url, html=html)
+            result = _maybe_recover_with_browser_catalog(result, url)
         else:
             result = feed_exporter.run(url)
         if result:
