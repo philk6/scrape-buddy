@@ -763,6 +763,101 @@ def _api_object_to_product(obj: dict, base_url: str) -> dict:
     return normalize_product(product)
 
 
+def _clean_table_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip()
+
+
+def _extract_magento_table_products(html: str, base_url: str) -> tuple[list[dict], list[str]]:
+    """
+    Extract products from B2B/Magento table catalogs.
+
+    Some wholesale sites render a real product table instead of cards. These
+    rows often contain product detail links, SKU/order code, tier prices, qty
+    inputs, and images, but no card class that the browser crawler can detect.
+    """
+    soup = BeautifulSoup(html or "", "html.parser")
+    products: list[dict] = []
+    urls: list[str] = []
+
+    for table in soup.select("table.product-table, table.products, table.catalog, table[class*='product']"):
+        header = table.find("tr")
+        header_text = header.get_text(" ", strip=True).lower() if header else ""
+        if not any(token in header_text for token in ("description", "price", "qty", "order", "image")):
+            continue
+
+        for row in table.find_all("tr"):
+            cells = row.find_all(["td", "th"], recursive=False)
+            if len(cells) < 3 or row.find("th"):
+                continue
+
+            link = next(
+                (
+                    a for a in row.find_all("a", href=True)
+                    if _looks_like_product_detail_url(urljoin(base_url, a.get("href", "")))
+                ),
+                None,
+            )
+            product_url = urljoin(base_url, link["href"]) if link else ""
+            if product_url:
+                urls.append(product_url)
+
+            sku_text = _clean_table_text(cells[0].get_text(" ", strip=True))
+            sku_candidates = [
+                value for value in re.findall(r"\b([A-Z0-9][A-Z0-9._/-]{3,})\b", sku_text, re.I)
+                if value.lower() not in {"order", "view", "product"}
+            ]
+            sku = sku_candidates[-1] if sku_candidates else ""
+
+            img = row.find("img")
+            image_url = urljoin(base_url, img.get("src", "")) if img and img.get("src") else ""
+
+            description_cell = cells[2]
+            category_link = description_cell.find("a")
+            category = _clean_table_text(category_link.get_text(" ", strip=True)) if category_link else ""
+            if category_link:
+                category_link.extract()
+            product_name = _clean_table_text(description_cell.get_text(" ", strip=True))
+            if not product_name and img and img.get("alt"):
+                product_name = _clean_table_text(img.get("alt", ""))
+
+            price = ""
+            for selector in (".ext-price", "[id^='ext-price']", ".price", "[data-price1]", "[data-price2]"):
+                found = row.select_one(selector)
+                if not found:
+                    continue
+                price = _clean_table_text(found.get_text(" ", strip=True) or found.get("data-price2") or found.get("data-price1") or "")
+                if price:
+                    break
+            if not price:
+                price_match = re.search(r"\$\s*\d+(?:\.\d{2})?", row.get_text(" ", strip=True))
+                price = price_match.group(0).replace(" ", "") if price_match else ""
+
+            pack_size = ""
+            case_pack = ""
+            tier_text = " ".join(_clean_table_text(cell.get_text(" ", strip=True)) for cell in cells[3:5])
+            tier_match = re.search(r"\b([A-Z]{1,4})\s*/\s*([\d.]+)\s*([A-Z]{1,4})\+", tier_text)
+            if tier_match:
+                pack_size = tier_match.group(1)
+                case_pack = f"{tier_match.group(2).rstrip('0').rstrip('.')} {tier_match.group(3)}"
+
+            product = normalize_product({
+                "product_name": product_name,
+                "brand": "",
+                "sku": sku,
+                "upc": "",
+                "price": price,
+                "pack_size": pack_size,
+                "case_pack": case_pack,
+                "image_url": image_url,
+                "product_url": product_url,
+                "category": category,
+            })
+            if product.get("product_name") and (product.get("sku") or product.get("product_url") or product.get("price")):
+                products.append(product)
+
+    return products, urls
+
+
 def _walk_api_payload(payload, base_url: str, products: list[dict], urls: list[str], *, limit: int = 3000) -> None:
     if len(products) >= limit:
         return
@@ -1978,6 +2073,35 @@ def _run_inner(page, listing_url: str) -> list:
             break
 
         # ── Approach A: collect /products/ links ──────────────────────────────
+        table_products, table_urls = _extract_magento_table_products(html, current_url)
+        if table_urls:
+            new_table_links = [lk for lk in table_urls if lk not in seen_links]
+            seen_links.update(table_urls)
+            all_product_links.extend(new_table_links)
+            logger.info(
+                f"[Strategy 3] {page_label}: table catalog contributed "
+                f"{len(table_urls)} product link(s), {len(new_table_links)} new"
+            )
+        if table_products:
+            existing_keys = {
+                p.get("product_url") or p.get("sku") or f"{p.get('product_name')}|{p.get('price')}"
+                for p in all_card_products
+            }
+            new_table_products = []
+            for product in table_products:
+                key = product.get("product_url") or product.get("sku") or f"{product.get('product_name')}|{product.get('price')}"
+                if key and key not in existing_keys:
+                    existing_keys.add(key)
+                    new_table_products.append(product)
+            if new_table_products:
+                logger.info(
+                    f"[Strategy 3] {page_label}: table catalog contributed "
+                    f"{len(new_table_products)} product row(s)"
+                )
+                all_card_products.extend(new_table_products)
+                if not winning_selector:
+                    winning_selector = "table.product-table tr"
+
         embedded_products, embedded_urls = _extract_embedded_json_products(
             html,
             current_url,
@@ -2118,6 +2242,7 @@ def _run_inner(page, listing_url: str) -> list:
                     len(page_links),
                     len(harvested_links),
                     len(api_capture["urls"]),
+                    len(table_urls),
                 )
                 if not pagination.get("per_page") and page_link_count:
                     pagination["per_page"] = page_link_count

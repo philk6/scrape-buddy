@@ -4,6 +4,7 @@ from strategies.playwright_catalog import (
     _api_object_to_product,
     _candidate_page_urls,
     _detail_enrichment_count_cap,
+    _extract_magento_table_products,
     _looks_like_product_detail_url,
     _looks_like_aggregate_product,
     _navigation_exhausted_reason,
@@ -92,6 +93,34 @@ class PlaywrightCatalogLinkTests(unittest.TestCase):
         )
 
         self.assertEqual(product, {})
+
+    def test_magento_table_products_extracts_priceking_style_rows(self):
+        html = """
+        <table class="product-table">
+          <tr><th>Order</th><th>Image</th><th>Description</th><th>Price2/Min</th><th>Price1/Min</th><th>Qty</th><th>Order Price</th></tr>
+          <tr>
+            <td><a href="https://example.com/california-scents-laguna-breez-9981796.html">ORDER</a> 9981796</td>
+            <td class="pro-img"><a href="/california-scents-laguna-breez-9981796.html"><img src="/media/9981796.jpg" alt="CALIFORNIA SCENTS LAGUNA BREEZ"></a></td>
+            <td>CALIFORNIA SCENTS LAGUNA BREEZ <div><p><a href="/febreze-vent-car-freshner.html">FEBREZE Vent Car-Freshner</a></p></div></td>
+            <td>$1.75 EA / 144 EA+</td>
+            <td>$1.89 EA / 12 EA+</td>
+            <td><input class="numbers-only qty-input" data-product-id="11870" data-price1="1.890000" data-price2="1.750000"></td>
+            <td><span class="ext-price">$1.75</span></td>
+          </tr>
+        </table>
+        """
+
+        products, urls = _extract_magento_table_products(html, "https://example.com/all-products.html")
+
+        self.assertEqual(len(products), 1)
+        self.assertEqual(products[0]["sku"], "9981796")
+        self.assertEqual(products[0]["product_name"], "CALIFORNIA SCENTS LAGUNA BREEZ")
+        self.assertEqual(products[0]["price"], "$1.75")
+        self.assertEqual(products[0]["pack_size"], "EA")
+        self.assertEqual(products[0]["case_pack"], "144 EA")
+        self.assertEqual(products[0]["category"], "FEBREZE Vent Car-Freshner")
+        self.assertEqual(products[0]["product_url"], "https://example.com/california-scents-laguna-breez-9981796.html")
+        self.assertEqual(urls, ["https://example.com/california-scents-laguna-breez-9981796.html"])
 
     def test_walk_api_payload_finds_nested_product_objects_and_urls(self):
         products = []
