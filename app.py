@@ -1188,7 +1188,7 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
         if total > 0:
             has_name = sum(1 for p in products if p.get("product_name"))
             has_price = sum(1 for p in products if p.get("price"))
-            has_upc = sum(1 for p in products if p.get("upc"))
+            has_identifier = sum(1 for p in products if p.get("upc") or p.get("ean") or p.get("gtin") or p.get("gtin_case") or p.get("barcode_raw"))
 
             name_pct = has_name / total * 100
             price_pct = has_price / total * 100
@@ -1219,7 +1219,7 @@ def _run_scrape_worker(run_id: int, url: str, html: str, use_playwright: bool = 
             logging.info(
                 f"[Job {run_id}] Quality: {has_name}/{total} names ({name_pct:.0f}%), "
                 f"{has_price}/{total} prices ({price_pct:.0f}%), "
-                f"{has_upc}/{total} UPCs ({has_upc/total*100:.0f}%)"
+                f"{has_identifier}/{total} UPC/EAN/GTINs ({has_identifier/total*100:.0f}%)"
             )
 
         database.complete_run(

@@ -1392,7 +1392,7 @@
       row.appendChild(makeCell(p.brand, !p.brand));
       row.appendChild(makeCell(p.price, !p.price));
       row.appendChild(makeCell(p.sku, !p.sku));
-      row.appendChild(makeUpcCell(p.upc, p.missing_upc, p.upc_enriched, p.upc_confidence_color, p.upc_match_reason));
+      row.appendChild(makeUpcCell(productIdentifier(p), p.missing_upc, p.upc_enriched, p.upc_confidence_color, p.upc_match_reason));
       row.appendChild(makeCell(p.pack_size, !p.pack_size));
       row.appendChild(makeCell(p.case_pack, !p.case_pack));
 
@@ -1457,6 +1457,10 @@
     return td;
   }
 
+  function productIdentifier(p) {
+    return ((p && (p.upc || p.gtin || p.ean || p.gtin_case || p.barcode_raw)) || '').toString().trim();
+  }
+
   function makeMissingSpan(text) {
     const span = document.createElement("span");
     span.className = "field-missing";
@@ -1470,7 +1474,7 @@
     if (!(p.price || "").trim()) missing++;
     if (!(p.product_url || "").trim()) missing++;
     if (!(p.sku || "").trim()) missing++;
-    if (!(p.upc || "").trim()) missing++;
+    if (!productIdentifier(p)) missing++;
     return missing;
   }
 
@@ -1479,7 +1483,7 @@
       if (currentFilter === "missing_name") return !(p.product_name || "").trim();
       if (currentFilter === "missing_price") return !(p.price || "").trim();
       if (currentFilter === "missing_sku") return !(p.sku || "").trim();
-      if (currentFilter === "missing_upc") return !(p.upc || "").trim();
+      if (currentFilter === "missing_upc") return !productIdentifier(p);
       if (currentFilter === "missing_url") return !(p.product_url || "").trim();
       return true;
     });
@@ -1513,7 +1517,7 @@
       ['URL', coveragePct(list, 'product_url')],
       ['Price', coveragePct(list, 'price')],
       ['SKU', coveragePct(list, 'sku')],
-      ['UPC', coveragePct(list, 'upc')],
+      ['UPC/GTIN/EAN', identifierCoveragePct(list)],
       ['Image', coveragePct(list, 'image_url')],
     ];
 
@@ -1529,6 +1533,12 @@
   function coveragePct(products, field) {
     if (!products.length) return 0;
     const filled = products.filter(p => (p[field] || '').toString().trim()).length;
+    return Math.round((filled / products.length) * 100);
+  }
+
+  function identifierCoveragePct(products) {
+    if (!products.length) return 0;
+    const filled = products.filter(p => productIdentifier(p)).length;
     return Math.round((filled / products.length) * 100);
   }
 
