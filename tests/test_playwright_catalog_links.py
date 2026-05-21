@@ -5,6 +5,7 @@ from strategies.playwright_catalog import (
     _candidate_page_urls,
     _detail_enrichment_count_cap,
     _extract_magento_table_products,
+    _extract_static_pagination_info,
     _looks_like_product_detail_url,
     _looks_like_aggregate_product,
     _navigation_exhausted_reason,
@@ -121,6 +122,19 @@ class PlaywrightCatalogLinkTests(unittest.TestCase):
         self.assertEqual(products[0]["category"], "FEBREZE Vent Car-Freshner")
         self.assertEqual(products[0]["product_url"], "https://example.com/california-scents-laguna-breez-9981796.html")
         self.assertEqual(urls, ["https://example.com/california-scents-laguna-breez-9981796.html"])
+
+    def test_static_pagination_info_reads_toolbar_amount(self):
+        html = """
+        <p class="toolbar-amount">
+            Items <span>1</span>-<span>100</span> of <span>1254</span>
+        </p>
+        """
+
+        info = _extract_static_pagination_info(html)
+
+        self.assertEqual(info["total_products"], 1254)
+        self.assertEqual(info["per_page"], 100)
+        self.assertEqual(info["total_pages"], 13)
 
     def test_walk_api_payload_finds_nested_product_objects_and_urls(self):
         products = []

@@ -95,8 +95,9 @@ AUTH_DETAIL_ENRICH_LIMIT = _positive_int_env(
 )
 PUBLIC_DETAIL_CONCURRENCY = min(
     16,
-    _positive_int_env("SCRAPEBUDDY_PUBLIC_DETAIL_CONCURRENCY", 8),
+    _positive_int_env("SCRAPEBUDDY_PUBLIC_DETAIL_CONCURRENCY", 16),
 )
+STATIC_TABLE_TIMEOUT = _positive_int_env("SCRAPEBUDDY_STATIC_TABLE_TIMEOUT", 25)
 
 GENERIC_ERROR_TITLES = {"oops.", "404", "page not found", "not found", "access denied"}
 
@@ -863,6 +864,29 @@ def _extract_magento_table_products(html: str, base_url: str) -> tuple[list[dict
                 products.append(product)
 
     return products, urls
+
+
+def _extract_static_pagination_info(html: str) -> dict:
+    """Read result count/page count from static catalog HTML."""
+    info = {"total_products": None, "per_page": None, "total_pages": None}
+    try:
+        import math
+
+        soup = BeautifulSoup(html or "", "html.parser")
+        text = soup.get_text(separator=" ")
+        match = _RESULT_COUNT_RE.search(text)
+        if match:
+            start = int(match.group(1).replace(",", ""))
+            end = int(match.group(2).replace(",", ""))
+            total = int(match.group(3).replace(",", ""))
+            per_page = end - start + 1
+            if total > 0 and per_page > 0:
+                info["total_products"] = total
+                info["per_page"] = per_page
+                info["total_pages"] = math.ceil(total / per_page)
+    except Exception as e:
+        logger.debug(f"[Strategy 3] Static pagination detection failed: {e}")
+    return info
 
 
 def _walk_api_payload(payload, base_url: str, products: list[dict], urls: list[str], *, limit: int = 3000) -> None:
@@ -1745,6 +1769,10 @@ def run_public(listing_url: str) -> list:
     that can scroll, click pagination, capture API JSON, and emit crawl
     diagnostics.
     """
+    static_products = _run_static_table_catalog(listing_url)
+    if static_products:
+        return static_products
+
     return _run_with_browser_context(
         listing_url,
         storage_state=None,
@@ -1931,6 +1959,122 @@ def _select_detail_enrichment_links(
 def _set_last_crawl_diagnostics(**values) -> None:
     LAST_CRAWL_DIAGNOSTICS.clear()
     LAST_CRAWL_DIAGNOSTICS.update({k: v for k, v in values.items() if v not in (None, "", [])})
+
+
+def _run_static_table_catalog(listing_url: str) -> list:
+    """
+    Fast public-catalog path for server-rendered B2B table catalogs.
+
+    These sites already expose all listing rows in HTML and use normal links for
+    pagination, so launching Chromium first is unnecessary and fragile on hosted
+    runtimes. Detail pages are still enriched afterward for UPC/GTIN/EAN.
+    """
+    if urlparse(listing_url).scheme not in {"http", "https"}:
+        return []
+
+    session = requests.Session()
+    visited: set[str] = set()
+    current_url = listing_url
+    base_netloc = urlparse(listing_url).netloc
+    page_num = 0
+    total_pages: int | None = None
+    total_products: int | None = None
+    stop_reason = ""
+    all_products: list[dict] = []
+    all_links: list[str] = []
+
+    while current_url and page_num < MAX_PAGES and current_url not in visited:
+        page_num += 1
+        visited.add(current_url)
+        try:
+            response = session.get(
+                current_url,
+                headers=HEADERS,
+                timeout=STATIC_TABLE_TIMEOUT,
+            )
+            response.raise_for_status()
+            html = response.text
+        except Exception as e:
+            stop_reason = f"static table fetch failed on page {page_num}: {e}"
+            logger.info(f"[Strategy 3] {stop_reason}")
+            break
+
+        page_products, page_links = _extract_magento_table_products(html, current_url)
+        if not page_products:
+            if page_num == 1:
+                return []
+            stop_reason = f"no table products found on page {page_num}"
+            break
+
+        all_products.extend(page_products)
+        all_links.extend(page_links)
+        logger.info(
+            f"[Strategy 3] Static table page {page_num}: "
+            f"{len(page_products)} row(s), {len(page_links)} detail link(s)"
+        )
+
+        if page_num == 1:
+            pagination = _extract_static_pagination_info(html)
+            total_pages = pagination.get("total_pages")
+            total_products = pagination.get("total_products")
+            if total_products:
+                logger.info(
+                    f"[Strategy 3] Static table result count: "
+                    f"{total_products} total product(s), {total_pages or '?'} page(s)"
+                )
+
+        soup = BeautifulSoup(html or "", "html.parser")
+        next_url = _find_next_page(soup, current_url, visited, base_netloc)
+        if not next_url:
+            stop_reason = _navigation_exhausted_reason(total_pages, page_num)
+            break
+        current_url = next_url
+
+    if page_num >= MAX_PAGES and current_url not in visited:
+        stop_reason = f"max page cap reached ({MAX_PAGES})"
+
+    if not all_products:
+        return []
+
+    deduped, removed = _dedup_products(all_products)
+    listing_by_url = {
+        product.get("product_url"): product
+        for product in deduped
+        if product.get("product_url")
+    }
+    detail_links = [link for link in dict.fromkeys(all_links) if link in listing_by_url]
+    if len(detail_links) > DETAIL_PAGE_LIMIT:
+        detail_links = detail_links[:DETAIL_PAGE_LIMIT]
+    if detail_links:
+        enriched = _enrich_public_detail_pages(detail_links, listing_by_url)
+        if enriched:
+            enriched_by_url = {
+                product.get("product_url"): product
+                for product in enriched
+                if product.get("product_url")
+            }
+            merged_rows = [
+                enriched_by_url.get(product.get("product_url")) or product
+                for product in deduped
+            ]
+            deduped, removed_after_enrich = _dedup_products(merged_rows)
+            removed += removed_after_enrich
+
+    _set_last_crawl_diagnostics(
+        expected_products=total_products,
+        expected_pages=total_pages,
+        pages_visited=page_num,
+        product_links_collected=len(dict.fromkeys(all_links)),
+        api_products_collected=0,
+        duplicate_rows_removed=removed,
+        stop_reason=stop_reason or "static table catalog completed",
+        source_type="static_table_catalog",
+    )
+    logger.info(
+        f"[Strategy 3] Static table catalog complete: "
+        f"{len(deduped)} product row(s)"
+    )
+    return deduped
 
 
 def _dedup_products(products: list) -> tuple:
